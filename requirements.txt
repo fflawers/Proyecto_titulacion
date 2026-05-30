@@ -1,0 +1,27 @@
+# =========================================
+# Dependencias del proyecto LUXO
+# =========================================
+
+# UI
+flet>=0.28.0
+
+# Base de datos
+mysql-connector-python>=8.0.0
+
+# PDF
+PyMuPDF>=1.24.0
+
+# HTTP
+requests>=2.31.0
+
+# Configuración
+python-dotenv>=1.0.0
+
+# RAG — Vector Store
+chromadb>=0.5.0
+
+# RAG — Embeddings (multilingüe)
+sentence-transformers>=3.0.0
+
+# Seguridad — Hashing de contraseñas
+bcrypt>=4.0.0
