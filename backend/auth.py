@@ -1,10 +1,17 @@
 # =========================================
-# auth.py — Autenticación y Seguridad
+# auth.py — Autenticación, JWT y Seguridad
 # =========================================
 
 import bcrypt
 import database
+from datetime import datetime, timedelta
+from jose import JWTError, jwt
+from config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRE_HOURS
 
+
+# =========================================
+# HASHING DE CONTRASEÑAS
+# =========================================
 
 def hashear_contrasena(contrasena_plana):
     """Genera un hash bcrypt de una contraseña en texto plano."""
@@ -22,10 +29,53 @@ def verificar_contrasena(contrasena_plana, hash_almacenado):
             hash_almacenado.encode("utf-8")
         )
     except Exception:
-        # Si el hash almacenado no es válido (texto plano antiguo),
-        # comparar directamente y migrar
         return False
 
+
+# =========================================
+# JWT TOKENS
+# =========================================
+
+def crear_token(user_data):
+    """
+    Crea un JWT con los datos del usuario.
+
+    Args:
+        user_data: dict con {id, nombre, rol}
+
+    Returns:
+        str: Token JWT
+    """
+    payload = {
+        "sub": str(user_data["id"]),
+        "nombre": user_data["nombre"],
+        "rol": user_data["rol"],
+        "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def verificar_token(token):
+    """
+    Decodifica y valida un JWT.
+
+    Returns:
+        dict con {id, nombre, rol} o None si es inválido
+    """
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return {
+            "id": int(payload["sub"]),
+            "nombre": payload["nombre"],
+            "rol": payload["rol"],
+        }
+    except JWTError:
+        return None
+
+
+# =========================================
+# LOGIN
+# =========================================
 
 def login(usuario, contrasena):
     """
@@ -43,7 +93,6 @@ def login(usuario, contrasena):
 
     # Verificar con bcrypt
     if hash_almacenado.startswith("$2b$") or hash_almacenado.startswith("$2a$"):
-        # Ya es un hash bcrypt
         if verificar_contrasena(contrasena, hash_almacenado):
             return {
                 "id": datos["ID_Usuario"],
@@ -54,7 +103,6 @@ def login(usuario, contrasena):
 
     # Contraseña en texto plano (legacy) — verificar y migrar
     if hash_almacenado == contrasena:
-        # Migrar a bcrypt de forma transparente
         nuevo_hash = hashear_contrasena(contrasena)
         database.actualizar_contrasena_hash(datos["ID_Usuario"], nuevo_hash)
         print(f"✅ Contraseña de '{usuario}' migrada a bcrypt automáticamente.")
@@ -67,6 +115,10 @@ def login(usuario, contrasena):
 
     return None
 
+
+# =========================================
+# MIGRACIÓN
+# =========================================
 
 def migrar_todas_las_contrasenas():
     """
@@ -88,7 +140,6 @@ def migrar_todas_las_contrasenas():
         migrados = 0
         for u in usuarios:
             contrasena = u["Contrasena"]
-            # Saltar si ya es bcrypt
             if contrasena.startswith("$2b$") or contrasena.startswith("$2a$"):
                 continue
 
@@ -109,7 +160,6 @@ def migrar_todas_las_contrasenas():
         db.close()
 
 
-# Ejecutar migración directamente: python auth.py
 if __name__ == "__main__":
     print("🔒 Migrando contraseñas a bcrypt...")
     migrar_todas_las_contrasenas()

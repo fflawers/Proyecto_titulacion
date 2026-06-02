@@ -1,36 +1,48 @@
 # =========================================
-# ARCHIVOS SENSIBLES GLOBALES
+# ARCHIVOS SENSIBLES / CREDENCIALES
 # =========================================
 .env
 .env.*
 *.env
+config.json
 
 # =========================================
-# CARPETAS TEMPORALES / CACHE (RAÍZ)
+# PYTHON
 # =========================================
 __pycache__/
-chroma_db/
-.DS_Store
-
-# =========================================
-# FRONTEND / NODE
-# =========================================
-node_modules/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
 dist/
-dist-ssr/
-*.local
+build/
+*.egg
 
 # =========================================
-# IGNORAR ARTEFACTOS DE MAC
+# ENTORNOS VIRTUALES
 # =========================================
+venv/
+.venv/
+env/
+ENV/
+
+# =========================================
+# IDE / EDITOR
+# =========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
-._*
-.Spotlight-V100
-.Trashes
 
 # =========================================
-# PYTHON GLOBALES
+# RAG / VECTOR STORE
 # =========================================
-*.pyc
+chroma_db/
+
+# =========================================
+# TEMPORALES Y LOGS
+# =========================================
 *.log
 *.tmp

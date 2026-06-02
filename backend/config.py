@@ -37,24 +37,30 @@ DB_CONFIG = {
 }
 
 # =========================================
+# JWT
+# =========================================
+
+JWT_SECRET = os.getenv("JWT_SECRET", "luxo-secret-key-change-in-production-2024")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "8"))
+
+# =========================================
 # RAG
 # =========================================
 
-# Modelo de embeddings multilingüe (español + inglés)
 EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
-
-# Tamaño de cada chunk de texto (en caracteres)
 CHUNK_SIZE = 500
-
-# Solapamiento entre chunks para no perder contexto
 CHUNK_OVERLAP = 50
-
-# Cantidad de chunks relevantes a recuperar por pregunta
 TOP_K_RESULTS = 5
 
 # =========================================
 # MEMORIA CONVERSACIONAL
 # =========================================
 
-# Cantidad de mensajes recientes a incluir como contexto
 MEMORY_SIZE = 5
+
+# =========================================
+# CORS — Frontend origins permitidos
+# =========================================
+
+CORS_ORIGINS = ["*"]  # Permite cualquier origen (ngrok, localhost:517X, etc.)

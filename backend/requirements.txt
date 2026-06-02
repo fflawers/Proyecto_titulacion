@@ -1,9 +1,16 @@
 # =========================================
-# Dependencias del proyecto LUXO
+# Dependencias del proyecto LUXO — Backend
 # =========================================
 
-# UI
-flet>=0.28.0
+# Web Framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
+# JWT Authentication
+python-jose[cryptography]>=3.3.0
+
+# File uploads
+python-multipart>=0.0.9
 
 # Base de datos
 mysql-connector-python>=8.0.0
