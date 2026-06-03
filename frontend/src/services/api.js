@@ -122,6 +122,23 @@ export function getDownloadUrl(id) {
   return `${API_URL}/api/manuales/${id}/download?token=${getToken()}`;
 }
 
+export async function obtenerHistorialAdmin(limite = 100, password = '') {
+  const res = await fetch(
+    `${API_URL}/api/admin/historial?limite=${limite}&x_historial_password=${encodeURIComponent(password)}`,
+    { headers: getHeaders() }
+  );
+  return handleResponse(res);
+}
+
+export async function verificarPasswordHistorial(password) {
+  const res = await fetch(`${API_URL}/api/admin/verify-historial`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ password }),
+  });
+  return handleResponse(res);
+}
+
 // =========================================
 // SESSION
 // =========================================

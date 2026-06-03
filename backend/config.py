@@ -61,6 +61,12 @@ RAG_RELEVANCE_THRESHOLD = 0.65  # Distancia coseno máxima para considerar un ch
 MEMORY_SIZE = 5
 
 # =========================================
+# CONTRASEÑA DEV PARA HISTORIAL
+# =========================================
+
+ADMIN_HISTORIAL_PASSWORD = os.getenv("ADMIN_HISTORIAL_PASSWORD", "luxo2024dev")
+
+# =========================================
 # CORS — Frontend origins permitidos
 # =========================================
 

@@ -23,16 +23,25 @@ def extraer_texto_pdf_bytes(contenido_bytes):
         return ""
 
 
+def normalizar_nombre_pdf(nombre_archivo):
+    """Convierte el nombre del archivo PDF a MAYÚSCULAS para homologar."""
+    return nombre_archivo.upper() if nombre_archivo else nombre_archivo
+
+
 def cargar_pdf(nombre_archivo, contenido_bytes):
     """
     Carga un nuevo PDF al sistema desde bytes (upload HTTP):
-    1. Extrae texto con PyMuPDF
-    2. Inserta en MySQL (texto + binario)
-    3. Indexa en ChromaDB (chunks + embeddings)
+    1. Normaliza el nombre a MAYÚSCULAS
+    2. Extrae texto con PyMuPDF
+    3. Inserta en MySQL (texto + binario)
+    4. Indexa en ChromaDB (chunks + embeddings)
 
     Retorna: (exito: bool, mensaje: str)
     """
     try:
+        # Normalizar nombre a mayúsculas
+        nombre_archivo = normalizar_nombre_pdf(nombre_archivo)
+
         texto = extraer_texto_pdf_bytes(contenido_bytes)
         if not texto.strip():
             return False, f"El PDF '{nombre_archivo}' no contiene texto extraíble."
@@ -53,12 +62,16 @@ def cargar_pdf(nombre_archivo, contenido_bytes):
 def actualizar_pdf(nombre_archivo, contenido_bytes):
     """
     Actualiza un manual existente o carga uno nuevo si no existe:
-    1. Busca si ya existe por nombre de archivo
-    2. Actualiza MySQL + re-indexa ChromaDB
+    1. Normaliza el nombre a MAYÚSCULAS
+    2. Busca si ya existe por nombre de archivo (case-insensitive)
+    3. Actualiza MySQL + re-indexa ChromaDB
 
     Retorna: (exito: bool, mensaje: str)
     """
     try:
+        # Normalizar nombre a mayúsculas
+        nombre_archivo = normalizar_nombre_pdf(nombre_archivo)
+
         texto = extraer_texto_pdf_bytes(contenido_bytes)
 
         existente = database.buscar_manual_por_nombre(nombre_archivo)

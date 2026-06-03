@@ -180,14 +180,14 @@ def actualizar_manual_pdf(id_manual, pdf_binario, texto_extraido, nueva_version)
 
 
 def buscar_manual_por_nombre(nombre_archivo):
-    """Busca un manual por nombre de archivo."""
+    """Busca un manual por nombre de archivo (case-insensitive)."""
     db = conectar_db()
     if not db:
         return None
     try:
         cursor = db.cursor(dictionary=True)
         cursor.execute(
-            "SELECT ID_Manual, Version FROM manuales WHERE Nombre_Archivo = %s",
+            "SELECT ID_Manual, Version FROM manuales WHERE UPPER(Nombre_Archivo) = UPPER(%s)",
             (nombre_archivo,),
         )
         return cursor.fetchone()
@@ -315,6 +315,52 @@ def obtener_historial_reciente(id_usuario, limite=5):
         return list(reversed(rows))
     except Exception as e:
         print("ERROR OBTENER HISTORIAL:", e)
+        return []
+    finally:
+        db.close()
+
+
+def obtener_historial_admin(limite=100):
+    """
+    Obtiene el historial completo de consultas de TODOS los usuarios.
+    Solo para administradores. Incluye nombre de usuario, feedback, y manual.
+    """
+    db = conectar_db()
+    if not db:
+        return []
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT
+                h.ID_Conversacion,
+                h.Pregunta_Usuario,
+                h.Respuesta_IA,
+                h.Fecha_Hora,
+                u.Nombre_Completo AS nombre_usuario,
+                u.Usuario AS usuario,
+                m.Nombre_Archivo AS nombre_manual,
+                f.Es_Positivo AS feedback
+            FROM historial_conversaciones h
+            LEFT JOIN usuarios u ON h.ID_Usuario = u.ID_Usuario
+            LEFT JOIN manuales m ON h.ID_Manual = m.ID_Manual
+            LEFT JOIN feedback_respuestas f ON h.ID_Conversacion = f.ID_Conversacion
+            ORDER BY h.Fecha_Hora DESC
+            LIMIT %s
+            """,
+            (limite,),
+        )
+        rows = cursor.fetchall()
+        # Serializar datetimes a string
+        for row in rows:
+            if row.get("Fecha_Hora"):
+                row["Fecha_Hora"] = row["Fecha_Hora"].strftime("%Y-%m-%d %H:%M:%S")
+            # feedback: True/False/None
+            if row.get("feedback") is not None:
+                row["feedback"] = bool(row["feedback"])
+        return rows
+    except Exception as e:
+        print("ERROR OBTENER HISTORIAL ADMIN:", e)
         return []
     finally:
         db.close()

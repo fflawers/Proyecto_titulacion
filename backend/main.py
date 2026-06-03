@@ -13,7 +13,7 @@ import auth
 import database
 import ai_engine
 import pdf_manager
-from config import CORS_ORIGINS
+from config import CORS_ORIGINS, ADMIN_HISTORIAL_PASSWORD
 
 # =========================================
 # APP
@@ -247,6 +247,35 @@ def download_manual(id_manual: int, user=Depends(get_current_user)):
             "Content-Disposition": f'attachment; filename="{pdf_data["nombre"]}"'
         },
     )
+
+
+# =========================================
+# ENDPOINTS — ADMIN: HISTORIAL DE CONSULTAS
+# =========================================
+
+class VerifyPasswordRequest(BaseModel):
+    password: str
+
+
+@app.post("/api/admin/verify-historial")
+def verify_historial_password(req: VerifyPasswordRequest, user=Depends(require_admin)):
+    """Verifica la contraseña de dev para acceder al historial."""
+    if req.password != ADMIN_HISTORIAL_PASSWORD:
+        raise HTTPException(status_code=403, detail="Contraseña incorrecta")
+    return {"success": True}
+
+
+@app.get("/api/admin/historial")
+def admin_historial(
+    limite: int = 100,
+    user=Depends(require_admin),
+    x_historial_password: Optional[str] = None,
+):
+    """Retorna el historial completo de consultas de todos los usuarios (solo admin + contraseña)."""
+    if x_historial_password != ADMIN_HISTORIAL_PASSWORD:
+        raise HTTPException(status_code=403, detail="Contraseña de historial requerida")
+    historial = database.obtener_historial_admin(limite)
+    return historial
 
 
 # =========================================

@@ -99,13 +99,48 @@ def detectar_intencion(pregunta):
     Clasifica la intención del usuario.
 
     Retorna:
-        "lista"     — quiere ver los manuales disponibles
-        "descargar" — quiere descargar un PDF explícitamente
-        "consulta"  — pregunta sobre contenido de manuales (RAG)
+        "conversacional" — saludo, pregunta sobre el bot, charla general (NO necesita PDF)
+        "lista"          — quiere ver los manuales disponibles
+        "descargar"      — quiere descargar un PDF explícitamente
+        "consulta"       — pregunta sobre contenido de manuales (RAG)
     """
     pregunta_lower = pregunta.lower().strip()
 
-    # Detectar si pide lista de manuales
+    # --- Detectar intención conversacional (NO requiere PDF) ---
+    # Preguntas sobre el bot / meta-preguntas
+    meta_keywords = [
+        "quién te creó", "quien te creo", "quién te hizo", "quien te hizo",
+        "quién eres", "quien eres", "qué eres", "que eres",
+        "cómo te llamas", "como te llamas",
+        "para qué sirves", "para que sirves",
+        "qué puedes hacer", "que puedes hacer",
+        "qué haces", "que haces",
+        "cómo funcionas", "como funcionas",
+        "cuál es tu nombre", "cual es tu nombre",
+        "eres un robot", "eres una ia", "eres inteligencia artificial",
+        "qué tecnología usas", "que tecnologia usas",
+        "te programaron", "te crearon", "te desarrollaron",
+    ]
+    if any(m in pregunta_lower for m in meta_keywords):
+        return "conversacional"
+
+    # Saludos y conversación básica
+    frases_conversacionales = [
+        "hola", "buenos días", "buenos dias", "buenas tardes",
+        "buenas noches", "hey", "hi", "hello",
+        "qué tal", "que tal", "cómo estás", "como estas",
+        "gracias", "muchas gracias", "te agradezco",
+        "ok", "vale", "de acuerdo", "entendido",
+        "adiós", "adios", "bye", "hasta luego", "nos vemos",
+        "buen día", "buen dia",
+    ]
+    # Solo si la pregunta ES básicamente un saludo (corta o exacta)
+    if len(pregunta_lower.split()) <= 5 and any(
+        s in pregunta_lower for s in frases_conversacionales
+    ):
+        return "conversacional"
+
+    # --- Detectar si pide lista de manuales ---
     lista_keywords = [
         "qué manuales", "que manuales", "manuales disponibles",
         "lista de pdf", "qué pdf", "que pdf", "mostrar pdf",
@@ -116,8 +151,7 @@ def detectar_intencion(pregunta):
     if any(phrase in pregunta_lower for phrase in lista_keywords):
         return "lista"
 
-    # Detectar si EXPLÍCITAMENTE quiere descargar un PDF
-    # Requiere un verbo de descarga + referencia a archivo
+    # --- Detectar si EXPLÍCITAMENTE quiere descargar un PDF ---
     verbos_descarga = [
         "descargar", "descarga", "descárgame", "download",
         "bajar", "bájame", "dame el archivo", "dame el pdf",
@@ -139,6 +173,7 @@ def buscar_manual_para_descarga(pregunta, manuales):
     """
     Busca el manual más relevante cuando el usuario quiere descargar un PDF.
     Usa scoring por palabras clave en el nombre del archivo.
+    Búsqueda case-insensitive (normaliza todo a minúsculas).
 
     Retorna: dict {id, nombre} o None
     """
@@ -149,6 +184,8 @@ def buscar_manual_para_descarga(pregunta, manuales):
         "de", "la", "el", "los", "las", "un", "una", "pdf",
         "manual", "documento", "archivo", "archivos", "descargar",
         "descarga", "download", "the", "a", "an", "of",
+        "dame", "quiero", "necesito", "pásame", "pasame",
+        "envíame", "enviame", "bájame", "bajame",
     }
     query_palabras = [w for w in palabras_query if w not in stopwords]
 
@@ -164,8 +201,14 @@ def buscar_manual_para_descarga(pregunta, manuales):
         # Nombre completo en la pregunta
         if nombre and nombre in pregunta_lower:
             score += 100
+        # Nombre sin extensión en la pregunta
+        nombre_sin_ext = nombre.rsplit(".", 1)[0] if "." in nombre else nombre
+        if nombre_sin_ext and nombre_sin_ext in pregunta_lower:
+            score += 80
         # Palabras del nombre que coinciden con la query
         score += sum(10 for p in nombre_palabras if p in query_palabras)
+        # Palabras de la query que aparecen en el nombre del archivo
+        score += sum(15 for p in query_palabras if p in nombre)
         # Palabras del nombre mencionadas en la pregunta
         score += sum(3 for p in nombre_palabras if p in pregunta_lower)
         # Palabras de la query en el texto del manual
@@ -304,6 +347,42 @@ def generar_respuesta(pregunta, id_usuario):
 
         intencion = detectar_intencion(pregunta)
         resultado["intencion"] = intencion
+
+        # --- Conversacional: saludo / meta-pregunta (sin PDF) ---
+        if intencion == "conversacional":
+            # No buscar PDF, responder directamente con la IA
+            historial = database.obtener_historial_reciente(id_usuario, MEMORY_SIZE)
+
+            system_prompt = construir_prompt_sistema([], usar_conocimiento_general=True)
+            messages = [{"role": "system", "content": system_prompt}]
+            for msg in historial:
+                messages.append({"role": "user", "content": msg["Pregunta_Usuario"]})
+                messages.append({"role": "assistant", "content": msg["Respuesta_IA"]})
+            messages.append({"role": "user", "content": pregunta})
+
+            headers = {
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            }
+            payload = {"model": GROQ_MODEL, "messages": messages}
+            res = requests.post(URL_GROQ, headers=headers, json=payload)
+
+            if res.status_code == 200:
+                data = res.json()
+                if "choices" in data and data["choices"]:
+                    resultado["respuesta"] = data["choices"][0]["message"]["content"]
+                else:
+                    resultado["respuesta"] = "Ocurrió un error consultando la IA."
+            else:
+                resultado["respuesta"] = f"Error de conexión con la IA ({res.status_code})."
+
+            # Guardar en historial SIN manual asociado
+            id_conv = database.guardar_historial(
+                id_usuario, None, pregunta, resultado["respuesta"]
+            )
+            resultado["id_conversacion"] = id_conv
+            # id_manual y nombre_pdf quedan como None/"" → no se muestra PDF
+            return resultado
 
         # --- Lista de manuales ---
         if intencion == "lista":
