@@ -1,12 +1,93 @@
 # =========================================
-# ai_engine.py — Motor de IA con RAG
+# ai_engine.py — Motor de IA con RAG + Web
 # =========================================
 
 import requests
 import re
-from config import GROQ_API_KEY, URL_GROQ, GROQ_MODEL, MEMORY_SIZE
+from config import (
+    GROQ_API_KEY, URL_GROQ, GROQ_MODEL,
+    MEMORY_SIZE, RAG_RELEVANCE_THRESHOLD,
+)
 import database
 import vector_store
+
+
+# =========================================
+# GUARDRAILS — Filtro de temas y mal uso
+# =========================================
+
+# Temas permitidos (relacionados con Sunglass Hut / retail / óptica)
+TEMAS_PERMITIDOS = [
+    "sunglass", "lentes", "gafas", "sol", "óptica", "optica",
+    "tienda", "ventas", "venta", "retail", "cliente", "clientes",
+    "inventario", "producto", "productos", "marca", "marcas",
+    "ray-ban", "rayban", "oakley", "prada", "gucci", "versace",
+    "coach", "michael kors", "tiffany", "burberry", "armani",
+    "dolce", "luxottica", "essilorluxottica",
+    "kpi", "kpis", "métricas", "metricas", "meta", "metas",
+    "robo", "robos", "seguridad", "pérdida", "perdida",
+    "devolución", "devolucion", "cambio", "cambios", "garantía", "garantia",
+    "horario", "turno", "turnos", "nómina", "nomina", "imss",
+    "capacitación", "capacitacion", "inducción", "induccion",
+    "manual", "manuales", "procedimiento", "protocolo",
+    "corte", "caja", "efectivo", "terminal", "pos",
+    "silla", "ergonomía", "ergonomia", "postura",
+    "uniforme", "dress code", "presentación", "presentacion",
+    "apertura", "cierre", "operación", "operacion",
+    "supervisor", "gerente", "asesor", "equipo",
+    "rh", "recursos humanos", "alta", "baja", "ingreso",
+    "ticket", "factura", "nota", "recibo",
+    "luxo", "sgh", "sunglass hut",
+    "descuento", "promoción", "promocion", "oferta",
+]
+
+# Palabras/temas bloqueados (mal uso)
+TEMAS_BLOQUEADOS = [
+    "hackear", "hackeo", "exploit", "vulnerabilidad",
+    "arma", "armas", "droga", "drogas", "narcotráfico",
+    "pornografía", "pornografia", "porno", "xxx",
+    "violencia", "matar", "asesinar", "suicidio",
+    "bomba", "explosivo", "terrorismo",
+    "torrent", "piratería", "pirateria", "crack",
+    "apuesta", "apuestas", "casino",
+    "desnudo", "desnuda", "sexo", "sexual",
+]
+
+
+def es_tema_bloqueado(pregunta):
+    """Detecta si la pregunta contiene temas prohibidos/mal uso."""
+    pregunta_lower = pregunta.lower()
+    return any(t in pregunta_lower for t in TEMAS_BLOQUEADOS)
+
+
+def es_tema_relevante(pregunta):
+    """
+    Verifica si la pregunta es relevante para el contexto de la empresa.
+    Retorna True si parece relacionada con Sunglass Hut / retail / operaciones.
+    También retorna True para saludos y preguntas generales corteses.
+    """
+    pregunta_lower = pregunta.lower().strip()
+
+    # Permitir saludos y conversación básica
+    saludos = [
+        "hola", "buenos días", "buenos dias", "buenas tardes",
+        "buenas noches", "hey", "hi", "hello", "qué tal", "que tal",
+        "cómo estás", "como estas", "gracias", "ok", "vale",
+        "ayuda", "help", "quién eres", "quien eres", "qué puedes",
+        "que puedes", "qué haces", "que haces",
+    ]
+    if any(s in pregunta_lower for s in saludos):
+        return True
+
+    # Verificar si contiene algún tema permitido
+    if any(t in pregunta_lower for t in TEMAS_PERMITIDOS):
+        return True
+
+    # Si la pregunta es muy corta (< 4 palabras), darle el beneficio de la duda
+    if len(pregunta_lower.split()) < 4:
+        return True
+
+    return False
 
 
 # =========================================
@@ -19,8 +100,8 @@ def detectar_intencion(pregunta):
 
     Retorna:
         "lista"     — quiere ver los manuales disponibles
-        "descargar" — quiere descargar un PDF
-        "consulta"  — pregunta sobre contenido de manuales
+        "descargar" — quiere descargar un PDF explícitamente
+        "consulta"  — pregunta sobre contenido de manuales (RAG)
     """
     pregunta_lower = pregunta.lower().strip()
 
@@ -35,14 +116,18 @@ def detectar_intencion(pregunta):
     if any(phrase in pregunta_lower for phrase in lista_keywords):
         return "lista"
 
-    # Detectar si quiere descargar un PDF
-    pdf_keywords = [
-        "pdf", "documento", "archivo", "descargar", "descarga",
-        "download", "abrir archivo", "open file",
+    # Detectar si EXPLÍCITAMENTE quiere descargar un PDF
+    # Requiere un verbo de descarga + referencia a archivo
+    verbos_descarga = [
+        "descargar", "descarga", "descárgame", "download",
+        "bajar", "bájame", "dame el archivo", "dame el pdf",
+        "envíame el pdf", "enviame el pdf", "pásame el pdf",
+        "pasame el pdf", "abrir archivo", "open file",
     ]
-    if any(k in pregunta_lower for k in pdf_keywords):
+    if any(v in pregunta_lower for v in verbos_descarga):
         return "descargar"
 
+    # Todo lo demás es una consulta de contenido → RAG
     return "consulta"
 
 
@@ -100,36 +185,75 @@ def buscar_manual_para_descarga(pregunta, manuales):
 # CONSTRUIR PROMPT DEL SISTEMA
 # =========================================
 
-def construir_prompt_sistema(chunks_contexto):
+def construir_prompt_sistema(chunks_contexto, usar_conocimiento_general=False):
     """
-    Construye el system prompt con el contexto RAG relevante.
+    Construye el system prompt con contexto RAG.
+    Si no hay buen contexto en los manuales, permite que la IA
+    use su conocimiento general (solo para temas de la empresa).
 
     Args:
         chunks_contexto: Lista de dicts del vector_store.buscar_contexto()
+        usar_conocimiento_general: Si True, la IA puede complementar con su conocimiento
     """
+    # --- Contexto de manuales ---
     if not chunks_contexto:
-        contexto_texto = "No se encontró información relevante en los manuales."
+        seccion_manuales = "No se encontró información relevante en los manuales internos."
     else:
         partes = []
         for i, chunk in enumerate(chunks_contexto, 1):
             nombre = chunk.get("nombre_archivo", "Manual")
             partes.append(f"--- Fragmento {i} (de: {nombre}) ---\n{chunk['texto']}")
-        contexto_texto = "\n\n".join(partes)
+        seccion_manuales = "\n\n".join(partes)
+
+    # --- Instrucción de conocimiento general ---
+    if usar_conocimiento_general:
+        instruccion_fallback = """- Si la información NO está en los manuales pero tú tienes conocimiento general
+  sobre el tema (retail, óptica, Sunglass Hut, atención al cliente, etc.),
+  puedes responder con tu conocimiento, pero ACLARA al usuario:
+  "Esta información no proviene de los manuales internos, es con base en mi conocimiento general."
+- Si no tienes información ni en los manuales ni en tu conocimiento, responde:
+  "Por el momento no cuento con esta información."""
+    else:
+        instruccion_fallback = """- Si la información solicitada NO está en los fragmentos de manuales, responde:
+  "Por el momento no cuento con esta información."""
 
     return f"""Eres LUXO, asistente operativo inteligente de Sunglass Hut.
 
-INSTRUCCIONES:
+INSTRUCCIONES PRINCIPALES:
 - Responde de manera natural, amable y profesional.
-- Usa SOLAMENTE la información proporcionada en los fragmentos de manuales a continuación.
-- Si la información solicitada NO está en los fragmentos, responde EXACTAMENTE:
-  "Por el momento no cuento con esta información."
+- PRIORIZA siempre la información de los manuales internos sobre cualquier otra fuente.
+- Si la información está en los manuales, úsala y cita el nombre del manual.
+{instruccion_fallback}
 - Puedes responder en español o inglés según el idioma de la pregunta.
 - Si la respuesta abarca varios pasos, usa listas numeradas.
-- Cita el nombre del manual de donde obtuviste la información cuando sea posible.
 
-CONTEXTO RELEVANTE DE LOS MANUALES:
+RESTRICCIONES DE SEGURIDAD:
+- SOLO responde preguntas relacionadas con Sunglass Hut, óptica, retail,
+  operaciones de tienda, recursos humanos, y temas empresariales relacionados.
+- Si la pregunta NO tiene relación con la empresa o el sector, responde amablemente:
+  "Lo siento, solo puedo ayudarte con temas relacionados con Sunglass Hut y
+   operaciones de tienda. ¿Tienes alguna duda operativa?"
+- NUNCA generes contenido inapropiado, ilegal o que no esté relacionado con la empresa.
 
-{contexto_texto}"""
+CONTEXTO DE LOS MANUALES INTERNOS:
+
+{seccion_manuales}"""
+
+
+# =========================================
+# FILTRAR CHUNKS RELEVANTES
+# =========================================
+
+def filtrar_chunks_relevantes(chunks, umbral=None):
+    """
+    Filtra chunks que tengan una distancia coseno por debajo del umbral.
+    Chunks con distancia alta = baja relevancia.
+
+    Retorna: (chunks_buenos, hay_contexto_bueno)
+    """
+    umbral = umbral or RAG_RELEVANCE_THRESHOLD
+    buenos = [c for c in chunks if c.get("distancia", 1.0) <= umbral]
+    return buenos, len(buenos) > 0
 
 
 # =========================================
@@ -138,12 +262,14 @@ CONTEXTO RELEVANTE DE LOS MANUALES:
 
 def generar_respuesta(pregunta, id_usuario):
     """
-    Pipeline completo de respuesta con RAG:
-    1. Detectar intención
-    2. Buscar contexto relevante (RAG)
-    3. Obtener historial reciente (memoria)
-    4. Llamar a Groq con todo el contexto
-    5. Guardar en historial
+    Pipeline completo de respuesta con RAG + Web fallback:
+    1. Verificar guardrails (temas bloqueados / fuera de contexto)
+    2. Detectar intención
+    3. Buscar contexto relevante (RAG)
+    4. Si RAG no tiene buena info → buscar en web
+    5. Obtener historial reciente (memoria)
+    6. Llamar a Groq con todo el contexto
+    7. Guardar en historial
 
     Args:
         pregunta: Texto de la pregunta del usuario
@@ -167,6 +293,15 @@ def generar_respuesta(pregunta, id_usuario):
     }
 
     try:
+        # --- GUARDRAIL: Temas bloqueados ---
+        if es_tema_bloqueado(pregunta):
+            resultado["respuesta"] = (
+                "⚠️ Lo siento, no puedo ayudarte con ese tipo de consulta. "
+                "Estoy aquí para asistirte con temas operativos de Sunglass Hut. "
+                "¿Tienes alguna duda sobre procedimientos, manuales o políticas de la tienda?"
+            )
+            return resultado
+
         intencion = detectar_intencion(pregunta)
         resultado["intencion"] = intencion
 
@@ -197,21 +332,48 @@ def generar_respuesta(pregunta, id_usuario):
                 )
             return resultado
 
-        # --- Consulta con RAG ---
+        # --- Consulta con RAG + Web fallback ---
 
         # 1. Buscar contexto relevante en ChromaDB
         chunks = vector_store.buscar_contexto(pregunta)
 
-        # Identificar el manual más relevante
-        if chunks:
-            resultado["id_manual"] = chunks[0].get("id_manual")
-            resultado["nombre_pdf"] = chunks[0].get("nombre_archivo", "")
+        # 2. Filtrar solo chunks verdaderamente relevantes
+        chunks_buenos, hay_buen_contexto = filtrar_chunks_relevantes(chunks)
 
-        # 2. Obtener historial reciente (memoria conversacional)
+        # Identificar el manual más relevante (de los buenos)
+        if chunks_buenos:
+            resultado["id_manual"] = chunks_buenos[0].get("id_manual")
+            resultado["nombre_pdf"] = chunks_buenos[0].get("nombre_archivo", "")
+
+        # 3. Si no hay buen contexto, decidir si usar conocimiento general de la IA
+        usar_conocimiento_general = False
+        if not hay_buen_contexto:
+            if es_tema_relevante(pregunta):
+                # Tema relevante → dejar que la IA use su conocimiento
+                print(f"🧠 RAG sin contexto bueno — usando conocimiento general de la IA: '{pregunta}'")
+                usar_conocimiento_general = True
+            else:
+                # Tema fuera de contexto → rechazar amablemente
+                resultado["respuesta"] = (
+                    "Lo siento, solo puedo ayudarte con temas relacionados con "
+                    "Sunglass Hut y operaciones de tienda. "
+                    "¿Tienes alguna duda operativa que pueda resolver?"
+                )
+                # Guardar en historial y retornar
+                id_conv = database.guardar_historial(
+                    id_usuario, None, pregunta, resultado["respuesta"]
+                )
+                resultado["id_conversacion"] = id_conv
+                return resultado
+
+        # 4. Obtener historial reciente (memoria conversacional)
         historial = database.obtener_historial_reciente(id_usuario, MEMORY_SIZE)
 
-        # 3. Construir mensajes para la API
-        system_prompt = construir_prompt_sistema(chunks)
+        # 5. Construir mensajes para la API
+        system_prompt = construir_prompt_sistema(
+            chunks_buenos if hay_buen_contexto else chunks,
+            usar_conocimiento_general,
+        )
 
         messages = [{"role": "system", "content": system_prompt}]
 
@@ -223,7 +385,7 @@ def generar_respuesta(pregunta, id_usuario):
         # Agregar la pregunta actual
         messages.append({"role": "user", "content": pregunta})
 
-        # 4. Llamar a Groq
+        # 6. Llamar a Groq
         headers = {
             "Authorization": f"Bearer {GROQ_API_KEY}",
             "Content-Type": "application/json",
@@ -245,7 +407,7 @@ def generar_respuesta(pregunta, id_usuario):
             print("AI CONNECTION ERROR:", res.status_code, res.text)
             resultado["respuesta"] = f"Error de conexión con la IA ({res.status_code})."
 
-        # 5. Guardar en historial
+        # 7. Guardar en historial
         id_conv = database.guardar_historial(
             id_usuario,
             resultado["id_manual"],
@@ -254,8 +416,8 @@ def generar_respuesta(pregunta, id_usuario):
         )
         resultado["id_conversacion"] = id_conv
 
-        # 6. Registrar pendiente si no pudo responder
-        if "Por el momento no cuento con esta información" in resultado["respuesta"]:
+        # 8. Registrar pendiente si no pudo responder
+        if "no cuento con esta información" in resultado["respuesta"].lower():
             if id_conv:
                 database.guardar_pendiente(id_conv, pregunta)
 

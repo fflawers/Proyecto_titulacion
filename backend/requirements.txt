@@ -32,3 +32,6 @@ sentence-transformers>=3.0.0
 
 # Seguridad — Hashing de contraseñas
 bcrypt>=4.0.0
+
+# Búsqueda web (fallback cuando RAG no encuentra)
+duckduckgo-search>=8.0.0

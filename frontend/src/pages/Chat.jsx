@@ -7,6 +7,7 @@ export default function Chat({ user, onLogout }) {
   const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [previewPdf, setPreviewPdf] = useState(null);
   const messagesEndRef = useRef(null);
 
   // Auto-scroll al último mensaje
@@ -70,12 +71,57 @@ export default function Chat({ user, onLogout }) {
     }
   }
 
-  function handleDownload(idManual) {
-    const token = localStorage.getItem('luxo_token');
-    window.open(
-      `http://localhost:8000/api/manuales/${idManual}/download`,
-      '_blank'
-    );
+  async function handleDownload(idManual, nombrePdf) {
+    try {
+      const token = localStorage.getItem('luxo_token');
+      const res = await fetch(`/api/manuales/${idManual}/download`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        throw new Error('No se pudo descargar el PDF');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = nombrePdf || 'manual.pdf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error al descargar PDF:', err);
+      alert('Error al descargar el PDF. Intenta de nuevo.');
+    }
+  }
+
+  async function handlePreview(idManual, nombrePdf) {
+    try {
+      const token = localStorage.getItem('luxo_token');
+      const res = await fetch(`/api/manuales/${idManual}/download`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        throw new Error('No se pudo cargar el PDF');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      setPreviewPdf({ url, nombre: nombrePdf || 'manual.pdf' });
+    } catch (err) {
+      console.error('Error al previsualizar PDF:', err);
+      alert('Error al cargar la vista previa del PDF.');
+    }
+  }
+
+  function closePreview() {
+    if (previewPdf?.url) {
+      window.URL.revokeObjectURL(previewPdf.url);
+    }
+    setPreviewPdf(null);
   }
 
   function handleKeyDown(e) {
@@ -162,17 +208,23 @@ export default function Chat({ user, onLogout }) {
                 {msg.text}
               </div>
 
-              {/* Download button */}
-              {msg.type === 'bot' &&
-                msg.intencion === 'descargar' &&
-                msg.id_manual && (
+              {/* PDF actions: preview + download */}
+              {msg.type === 'bot' && msg.id_manual && (
+                <div className="pdf-actions">
+                  <button
+                    className="preview-btn"
+                    onClick={() => handlePreview(msg.id_manual, msg.nombre_pdf)}
+                  >
+                    👁️ Vista previa: {msg.nombre_pdf}
+                  </button>
                   <button
                     className="download-btn"
-                    onClick={() => handleDownload(msg.id_manual)}
+                    onClick={() => handleDownload(msg.id_manual, msg.nombre_pdf)}
                   >
-                    📥 Descargar: {msg.nombre_pdf}
+                    📥 Descargar
                   </button>
-                )}
+                </div>
+              )}
 
               {/* Feedback buttons */}
               {msg.type === 'bot' && msg.id_conversacion && (
@@ -236,6 +288,36 @@ export default function Chat({ user, onLogout }) {
           </button>
         </div>
       </div>
+
+      {/* PDF Preview Modal */}
+      {previewPdf && (
+        <div className="modal-overlay" onClick={closePreview}>
+          <div className="pdf-preview-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="pdf-preview-header">
+              <span className="pdf-preview-title">📄 {previewPdf.nombre}</span>
+              <div className="pdf-preview-actions">
+                <button
+                  className="download-btn"
+                  onClick={() => {
+                    const a = document.createElement('a');
+                    a.href = previewPdf.url;
+                    a.download = previewPdf.nombre;
+                    a.click();
+                  }}
+                >
+                  📥 Descargar
+                </button>
+                <button className="modal-close" onClick={closePreview}>✕</button>
+              </div>
+            </div>
+            <iframe
+              src={previewPdf.url}
+              className="pdf-preview-iframe"
+              title={previewPdf.nombre}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Admin Panel Modal */}
       {showAdmin && (
