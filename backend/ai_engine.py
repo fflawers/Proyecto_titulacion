@@ -4,12 +4,79 @@
 
 import requests
 import re
+import time
 from config import (
     GROQ_API_KEY, URL_GROQ, GROQ_MODEL,
     MEMORY_SIZE, RAG_RELEVANCE_THRESHOLD,
 )
 import database
 import vector_store
+
+
+# =========================================
+# LLAMADA A GROQ CON REINTENTOS
+# =========================================
+
+def llamar_groq(messages, max_reintentos=3):
+    """
+    Llama a la API de Groq con reintentos automáticos para errores 429.
+    Espera progresiva: 2s, 4s, 8s entre reintentos.
+
+    Args:
+        messages: Lista de mensajes para la API
+        max_reintentos: Número máximo de reintentos (default: 3)
+
+    Returns:
+        dict {ok: bool, respuesta: str}
+    """
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+    }
+
+    for intento in range(max_reintentos + 1):
+        try:
+            res = requests.post(URL_GROQ, headers=headers, json=payload)
+
+            if res.status_code == 200:
+                data = res.json()
+                if "choices" in data and data["choices"]:
+                    return {"ok": True, "respuesta": data["choices"][0]["message"]["content"]}
+                else:
+                    return {"ok": False, "respuesta": "Ocurrió un error consultando la IA."}
+
+            elif res.status_code == 429:
+                # Rate limit — reintentar con espera progresiva
+                if intento < max_reintentos:
+                    espera = 2 ** (intento + 1)  # 2s, 4s, 8s
+                    print(f"⏳ Rate limit (429) — reintentando en {espera}s (intento {intento + 1}/{max_reintentos})")
+                    time.sleep(espera)
+                    continue
+                else:
+                    print("❌ Rate limit (429) — reintentos agotados")
+                    return {
+                        "ok": False,
+                        "respuesta": (
+                            "⏳ El servicio de IA está temporalmente saturado. "
+                            "Por favor espera unos segundos e intenta de nuevo."
+                        ),
+                    }
+            else:
+                print(f"AI CONNECTION ERROR: {res.status_code} {res.text}")
+                return {"ok": False, "respuesta": f"Error de conexión con la IA ({res.status_code})."}
+
+        except requests.exceptions.RequestException as e:
+            print(f"AI REQUEST EXCEPTION: {e}")
+            if intento < max_reintentos:
+                time.sleep(2)
+                continue
+            return {"ok": False, "respuesta": "Error de conexión con el servicio de IA."}
+
+    return {"ok": False, "respuesta": "Error inesperado al contactar la IA."}
 
 
 # =========================================
@@ -360,21 +427,8 @@ def generar_respuesta(pregunta, id_usuario):
                 messages.append({"role": "assistant", "content": msg["Respuesta_IA"]})
             messages.append({"role": "user", "content": pregunta})
 
-            headers = {
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            }
-            payload = {"model": GROQ_MODEL, "messages": messages}
-            res = requests.post(URL_GROQ, headers=headers, json=payload)
-
-            if res.status_code == 200:
-                data = res.json()
-                if "choices" in data and data["choices"]:
-                    resultado["respuesta"] = data["choices"][0]["message"]["content"]
-                else:
-                    resultado["respuesta"] = "Ocurrió un error consultando la IA."
-            else:
-                resultado["respuesta"] = f"Error de conexión con la IA ({res.status_code})."
+            groq_result = llamar_groq(messages)
+            resultado["respuesta"] = groq_result["respuesta"]
 
             # Guardar en historial SIN manual asociado
             id_conv = database.guardar_historial(
@@ -464,27 +518,9 @@ def generar_respuesta(pregunta, id_usuario):
         # Agregar la pregunta actual
         messages.append({"role": "user", "content": pregunta})
 
-        # 6. Llamar a Groq
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": GROQ_MODEL,
-            "messages": messages,
-        }
-
-        res = requests.post(URL_GROQ, headers=headers, json=payload)
-
-        if res.status_code == 200:
-            data = res.json()
-            if "choices" in data and data["choices"]:
-                resultado["respuesta"] = data["choices"][0]["message"]["content"]
-            else:
-                resultado["respuesta"] = "Ocurrió un error consultando la IA."
-        else:
-            print("AI CONNECTION ERROR:", res.status_code, res.text)
-            resultado["respuesta"] = f"Error de conexión con la IA ({res.status_code})."
+        # 6. Llamar a Groq (con reintentos automáticos)
+        groq_result = llamar_groq(messages)
+        resultado["respuesta"] = groq_result["respuesta"]
 
         # 7. Guardar en historial
         id_conv = database.guardar_historial(
