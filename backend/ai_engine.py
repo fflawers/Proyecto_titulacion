@@ -317,15 +317,23 @@ def construir_prompt_sistema(chunks_contexto, usar_conocimiento_general=False):
 
     # --- Instrucción de conocimiento general ---
     if usar_conocimiento_general:
-        instruccion_fallback = """- Si la información NO está en los manuales pero tú tienes conocimiento general
-  sobre el tema (retail, óptica, Sunglass Hut, atención al cliente, etc.),
-  puedes responder con tu conocimiento, pero ACLARA al usuario:
-  "Esta información no proviene de los manuales internos, es con base en mi conocimiento general."
-- Si no tienes información ni en los manuales ni en tu conocimiento, responde:
-  "Por el momento no cuento con esta información."""
+        instruccion_fallback = (
+            "- Puedes responder con tu conocimiento general sobre retail, óptica y Sunglass Hut\n"
+            "  ÚNICAMENTE para información básica de contexto (definiciones, conceptos generales).\n"
+            "- ACLARA siempre: Esta información no proviene de los manuales internos.\n"
+            "- JAMÁS inventes procedimientos, políticas, listas de pasos o contenido específico que no esté en los fragmentos.\n"
+            "- Si el usuario pide el contenido de un documento específico que no está en los fragmentos, responde:\n"
+            "  No encontré ese documento en el sistema. ¿Está cargado en los manuales?"
+        )
     else:
-        instruccion_fallback = """- Si la información solicitada NO está en los fragmentos de manuales, responde:
-  "Por el momento no cuento con esta información."""
+        instruccion_fallback = (
+            "- Si la información solicitada NO está EXPLÍCITAMENTE en los fragmentos de manuales, responde:\n"
+            "  No encontré información sobre eso en los manuales disponibles.\n"
+            "- NUNCA inventes procedimientos, políticas, listas de pasos o datos que no estén en los fragmentos.\n"
+            "- Si el usuario pregunta por un documento específico que no aparece en los fragmentos, responde:\n"
+            "  Ese documento no está disponible en el sistema actualmente."
+        )
+
 
     return f"""Eres LUXO, asistente operativo inteligente de Sunglass Hut.
 
@@ -467,8 +475,34 @@ def generar_respuesta(pregunta, id_usuario):
 
         # --- Consulta con RAG + Web fallback ---
 
-        # 1. Buscar contexto relevante en ChromaDB
+        # 1a. Intentar búsqueda por nombre de archivo si la pregunta menciona uno
+        #     (útil para PDFs con texto OCR de baja calidad semántica)
+        manuales_disponibles = database.obtener_manuales_listado()
+        chunks_por_nombre = []
+        for manual in manuales_disponibles:
+            nombre = (manual.get("Nombre_Archivo") or "").lower()
+            nombre_sin_ext = nombre.rsplit(".", 1)[0]
+            # Palabras significativas del nombre (>3 letras)
+            palabras_nombre = [p for p in nombre_sin_ext.split() if len(p) > 3]
+            pregunta_lower = pregunta.lower()
+            # Si al menos 2 palabras del nombre aparecen en la pregunta → buscar sus chunks
+            coincidencias = sum(1 for p in palabras_nombre if p in pregunta_lower)
+            if coincidencias >= 2 or (len(palabras_nombre) == 1 and palabras_nombre[0] in pregunta_lower):
+                nombre_query = " ".join(palabras_nombre)
+                found = vector_store.buscar_por_nombre_archivo(nombre_query)
+                if found:
+                    print(f"📁 Match por nombre de archivo: '{nombre}' ({len(found)} chunks)")
+                    chunks_por_nombre.extend(found)
+
+        # 1b. Búsqueda semántica estándar
         chunks = vector_store.buscar_contexto(pregunta)
+
+        # Combinar: primero los de nombre exacto, luego los semánticos (sin duplicados)
+        ids_ya_incluidos = {c["texto"][:50] for c in chunks_por_nombre}
+        for c in chunks:
+            if c["texto"][:50] not in ids_ya_incluidos:
+                chunks_por_nombre.append(c)
+        chunks = chunks_por_nombre
 
         # 2. Filtrar solo chunks verdaderamente relevantes
         chunks_buenos, hay_buen_contexto = filtrar_chunks_relevantes(chunks)
@@ -478,13 +512,16 @@ def generar_respuesta(pregunta, id_usuario):
             resultado["id_manual"] = chunks_buenos[0].get("id_manual")
             resultado["nombre_pdf"] = chunks_buenos[0].get("nombre_archivo", "")
 
-        # 3. Si no hay buen contexto, decidir si usar conocimiento general de la IA
+        # 3. Si no hay buen contexto, ser honesto — NO alunar con conocimiento general
         usar_conocimiento_general = False
         if not hay_buen_contexto:
             if es_tema_relevante(pregunta):
-                # Tema relevante → dejar que la IA use su conocimiento
-                print(f"🧠 RAG sin contexto bueno — usando conocimiento general de la IA: '{pregunta}'")
+                # Hay topic relevante pero sin documento cargado → responder honestamente
+                print(f"⚠️  RAG sin contexto bueno para: '{pregunta}' — respondiendo sin PDF")
                 usar_conocimiento_general = True
+                # Limpiar referencia a PDF para no mostrar botón incorrecto
+                resultado["id_manual"] = None
+                resultado["nombre_pdf"] = ""
             else:
                 # Tema fuera de contexto → rechazar amablemente
                 resultado["respuesta"] = (
@@ -492,7 +529,6 @@ def generar_respuesta(pregunta, id_usuario):
                     "Sunglass Hut y operaciones de tienda. "
                     "¿Tienes alguna duda operativa que pueda resolver?"
                 )
-                # Guardar en historial y retornar
                 id_conv = database.guardar_historial(
                     id_usuario, None, pregunta, resultado["respuesta"]
                 )
@@ -531,8 +567,23 @@ def generar_respuesta(pregunta, id_usuario):
         )
         resultado["id_conversacion"] = id_conv
 
-        # 8. Registrar pendiente si no pudo responder
-        if "no cuento con esta información" in resultado["respuesta"].lower():
+        # 8. Si la respuesta indica que no encontró info, limpiar referencia al PDF
+        #    para no mostrar el botón de vista previa de un documento incorrecto
+        frases_sin_info = [
+            "no encontré información",
+            "no encontré ese documento",
+            "no está disponible en el sistema",
+            "no cuento con esta información",
+            "por el momento no cuento",
+        ]
+        respuesta_lower = resultado["respuesta"].lower()
+        if any(f in respuesta_lower for f in frases_sin_info):
+            resultado["id_manual"] = None
+            resultado["nombre_pdf"] = ""
+
+        # 9. Registrar pendiente si no pudo responder
+        if "no cuento con esta información" in resultado["respuesta"].lower() or \
+           "no encontré" in resultado["respuesta"].lower():
             if id_conv:
                 database.guardar_pendiente(id_conv, pregunta)
 

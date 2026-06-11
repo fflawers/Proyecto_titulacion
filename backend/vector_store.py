@@ -234,6 +234,49 @@ def buscar_contexto(pregunta, top_k=None):
     return contextos
 
 
+def buscar_por_nombre_archivo(nombre_parcial, top_k=None):
+    """
+    Busca chunks de un manual específico usando el nombre del archivo.
+    Útil cuando la pregunta menciona directamente el nombre del documento.
+
+    Args:
+        nombre_parcial: Palabras clave del nombre del archivo (case-insensitive)
+        top_k: Máximo de chunks a retornar
+
+    Returns:
+        Lista de dicts con {texto, nombre_archivo, id_manual, distancia=0.0}
+    """
+    collection = obtener_coleccion()
+    top_k = top_k or TOP_K_RESULTS
+
+    if collection.count() == 0:
+        return []
+
+    try:
+        # Obtener todos los metadatos y filtrar por nombre
+        todos = collection.get(include=["documents", "metadatas"])
+        nombre_lower = nombre_parcial.lower()
+
+        coincidencias = []
+        for i, meta in enumerate(todos.get("metadatas", [])):
+            nombre_archivo = (meta.get("nombre_archivo") or "").lower()
+            # Coincidencia si alguna palabra clave del nombre parcial aparece en el archivo
+            palabras = [p for p in nombre_lower.split() if len(p) > 2]
+            if any(p in nombre_archivo for p in palabras):
+                coincidencias.append({
+                    "texto": todos["documents"][i],
+                    "nombre_archivo": meta.get("nombre_archivo", ""),
+                    "id_manual": meta.get("id_manual", ""),
+                    "distancia": 0.0,  # Match por nombre = alta confianza
+                })
+
+        return coincidencias[:top_k]
+
+    except Exception as e:
+        print(f"⚠️  Error en buscar_por_nombre_archivo: {e}")
+        return []
+
+
 # =========================================
 # RE-INDEXAR TODOS LOS MANUALES
 # =========================================

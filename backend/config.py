@@ -52,7 +52,10 @@ EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 TOP_K_RESULTS = 5
-RAG_RELEVANCE_THRESHOLD = 0.65  # Distancia coseno máxima para considerar un chunk relevante
+RAG_RELEVANCE_THRESHOLD = 0.50  # Distancia coseno máxima para considerar un chunk relevante
+                                 # 0.38 era demasiado estricto para texto OCR (baja precisión semántica)
+                                 # Valores más bajos = más estricto (0=idéntico, 1=sin relación)
+
 
 # =========================================
 # MEMORIA CONVERSACIONAL

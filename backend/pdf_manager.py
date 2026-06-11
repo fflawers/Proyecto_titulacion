@@ -2,25 +2,78 @@
 # pdf_manager.py — Gestión de PDFs (Web)
 # =========================================
 
+import io
 import os
-import tempfile
 import fitz  # PyMuPDF
 import database
 import vector_store
 
+# OCR opcional — se activa si tesseract está instalado
+try:
+    import pytesseract
+    from PIL import Image
+    _OCR_DISPONIBLE = True
+    print("✅ OCR disponible (pytesseract)")
+except ImportError:
+    _OCR_DISPONIBLE = False
+    print("⚠️  OCR no disponible (pytesseract no instalado)")
+
+
+def _ocr_pdf_bytes(contenido_bytes):
+    """
+    Fallback OCR: convierte cada página del PDF a imagen y extrae texto.
+    Se usa cuando PyMuPDF no puede extraer texto (PDFs escaneados/imagen).
+    Requiere tesseract instalado en el sistema.
+    """
+    if not _OCR_DISPONIBLE:
+        return ""
+    try:
+        pdf = fitz.open(stream=contenido_bytes, filetype="pdf")
+        texto_ocr = ""
+        for pagina in pdf:
+            # Renderizar la página como imagen (200 DPI para buena calidad)
+            mat = fitz.Matrix(200 / 72, 200 / 72)
+            pix = pagina.get_pixmap(matrix=mat)
+            img_bytes = pix.tobytes("png")
+            img = Image.open(io.BytesIO(img_bytes))
+            # OCR con soporte español e inglés
+            texto_pagina = pytesseract.image_to_string(img, lang="spa+eng")
+            texto_ocr += texto_pagina + "\n"
+        pdf.close()
+        return texto_ocr.strip()
+    except Exception as e:
+        print("ERROR OCR:", e)
+        return ""
+
 
 def extraer_texto_pdf_bytes(contenido_bytes):
-    """Extrae todo el texto de un PDF a partir de sus bytes."""
+    """
+    Extrae todo el texto de un PDF a partir de sus bytes.
+    1. Intenta PyMuPDF (texto nativo — rápido y exacto).
+    2. Si el resultado tiene menos de 50 caracteres, aplica OCR como fallback.
+    """
     try:
         pdf = fitz.open(stream=contenido_bytes, filetype="pdf")
         texto = ""
         for pagina in pdf:
             texto += pagina.get_text()
         pdf.close()
+
+        # Si el texto es muy corto, probablemente es un PDF de imagen → OCR
+        if len(texto.strip()) < 50:
+            print("⚠️  Texto insuficiente en PDF — aplicando OCR...")
+            texto_ocr = _ocr_pdf_bytes(contenido_bytes)
+            if texto_ocr:
+                print(f"✅ OCR exitoso: {len(texto_ocr)} caracteres extraídos")
+                return texto_ocr
+            else:
+                print("❌ OCR tampoco pudo extraer texto")
+
         return texto
     except Exception as e:
         print("ERROR EXTRAER PDF:", e)
         return ""
+
 
 
 def normalizar_nombre_pdf(nombre_archivo):
@@ -44,7 +97,11 @@ def cargar_pdf(nombre_archivo, contenido_bytes):
 
         texto = extraer_texto_pdf_bytes(contenido_bytes)
         if not texto.strip():
-            return False, f"El PDF '{nombre_archivo}' no contiene texto extraíble."
+            return False, (
+                f"El PDF '{nombre_archivo}' no contiene texto extraíble. "
+                "Si es un documento escaneado, asegúrate de que Tesseract OCR esté instalado "
+                "en el servidor para procesarlo automáticamente."
+            )
 
         id_manual = database.insertar_manual(nombre_archivo, contenido_bytes, texto)
         if not id_manual:

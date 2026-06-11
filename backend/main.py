@@ -8,11 +8,13 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional
+from urllib.parse import quote
 
 import auth
 import database
 import ai_engine
 import pdf_manager
+import excel_manager
 from config import CORS_ORIGINS, ADMIN_HISTORIAL_PASSWORD
 
 # =========================================
@@ -190,12 +192,23 @@ async def upload_manual(
     archivo: UploadFile = File(...),
     user=Depends(require_admin),
 ):
-    """Sube un nuevo PDF (solo admin)."""
-    if not archivo.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Solo se permiten archivos PDF")
+    """Sube un nuevo manual PDF o Excel (solo admin)."""
+    nombre = archivo.filename.lower()
+    es_pdf = nombre.endswith(".pdf")
+    es_excel = nombre.endswith(".xlsx") or nombre.endswith(".xls")
+
+    if not es_pdf and not es_excel:
+        raise HTTPException(
+            status_code=400,
+            detail="Solo se permiten archivos PDF (.pdf) o Excel (.xlsx, .xls)",
+        )
 
     contenido = await archivo.read()
-    exito, mensaje = pdf_manager.cargar_pdf(archivo.filename, contenido)
+
+    if es_pdf:
+        exito, mensaje = pdf_manager.cargar_pdf(archivo.filename, contenido)
+    else:
+        exito, mensaje = excel_manager.cargar_excel(archivo.filename, contenido)
 
     if not exito:
         raise HTTPException(status_code=400, detail=mensaje)
@@ -208,12 +221,23 @@ async def update_manual(
     archivo: UploadFile = File(...),
     user=Depends(require_admin),
 ):
-    """Actualiza un manual existente (solo admin)."""
-    if not archivo.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Solo se permiten archivos PDF")
+    """Actualiza un manual PDF o Excel existente (solo admin)."""
+    nombre = archivo.filename.lower()
+    es_pdf = nombre.endswith(".pdf")
+    es_excel = nombre.endswith(".xlsx") or nombre.endswith(".xls")
+
+    if not es_pdf and not es_excel:
+        raise HTTPException(
+            status_code=400,
+            detail="Solo se permiten archivos PDF (.pdf) o Excel (.xlsx, .xls)",
+        )
 
     contenido = await archivo.read()
-    exito, mensaje = pdf_manager.actualizar_pdf(archivo.filename, contenido)
+
+    if es_pdf:
+        exito, mensaje = pdf_manager.actualizar_pdf(archivo.filename, contenido)
+    else:
+        exito, mensaje = excel_manager.actualizar_excel(archivo.filename, contenido)
 
     if not exito:
         raise HTTPException(status_code=400, detail=mensaje)
@@ -240,11 +264,32 @@ def download_manual(id_manual: int, user=Depends(get_current_user)):
     if not pdf_data:
         raise HTTPException(status_code=404, detail="PDF no encontrado")
 
+    nombre = pdf_data["nombre"]
+    nombre_encoded = quote(nombre)
     return Response(
         content=pdf_data["contenido_bytes"],
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'attachment; filename="{pdf_data["nombre"]}"'
+            "Content-Disposition": f"attachment; filename*=UTF-8''{nombre_encoded}"
+        },
+    )
+
+
+@app.get("/api/manuales/{id_manual}/download-excel")
+def download_excel(id_manual: int, user=Depends(get_current_user)):
+    """Descarga el Excel de un manual."""
+    excel_data = excel_manager.obtener_excel_para_descarga(id_manual)
+
+    if not excel_data:
+        raise HTTPException(status_code=404, detail="Excel no encontrado")
+
+    nombre = excel_data["nombre"]
+    nombre_encoded = quote(nombre)
+    return Response(
+        content=excel_data["contenido_bytes"],
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{nombre_encoded}"
         },
     )
 

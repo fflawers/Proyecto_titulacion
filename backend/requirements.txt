@@ -17,6 +17,8 @@ mysql-connector-python>=8.0.0
 
 # PDF
 PyMuPDF>=1.24.0
+pytesseract>=0.3.10
+Pillow>=10.0.0
 
 # HTTP
 requests>=2.31.0
@@ -35,3 +37,6 @@ bcrypt>=4.0.0
 
 # Búsqueda web (fallback cuando RAG no encuentra)
 duckduckgo-search>=8.0.0
+
+# Excel
+openpyxl>=3.1.0

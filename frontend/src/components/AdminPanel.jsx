@@ -54,8 +54,10 @@ export default function AdminPanel({ onClose }) {
   }
 
   async function handleFile(file) {
-    if (!file || !file.name.toLowerCase().endsWith('.pdf')) {
-      showMessage('Solo se permiten archivos PDF', 'error');
+    const nombre = file?.name.toLowerCase();
+    const esValido = nombre?.endsWith('.pdf') || nombre?.endsWith('.xlsx') || nombre?.endsWith('.xls');
+    if (!file || !esValido) {
+      showMessage('Solo se permiten archivos PDF (.pdf) o Excel (.xlsx, .xls)', 'error');
       return;
     }
 
@@ -235,16 +237,16 @@ export default function AdminPanel({ onClose }) {
               </div>
               <div className="upload-text">
                 {uploading
-                  ? 'Procesando PDF...'
+                  ? 'Procesando archivo...'
                   : mode === 'upload'
-                    ? 'Arrastra un PDF aquí o haz click para seleccionar'
-                    : 'Arrastra el PDF actualizado o haz click para seleccionar'}
+                    ? 'Arrastra un PDF o Excel aquí o haz click para seleccionar'
+                    : 'Arrastra el archivo actualizado o haz click para seleccionar'}
               </div>
-              <div className="upload-hint">Solo archivos .pdf</div>
+              <div className="upload-hint">Archivos permitidos: .pdf · .xlsx · .xls</div>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf"
+                accept=".pdf,.xlsx,.xls"
                 style={{ display: 'none' }}
                 onChange={handleFileChange}
               />

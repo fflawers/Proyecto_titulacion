@@ -7,7 +7,8 @@ export default function Chat({ user, onLogout }) {
   const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
-  const [previewPdf, setPreviewPdf] = useState(null);
+  const [previewPdf, setPreviewPdf] = useState(null);   // { url, nombre } para PDF
+  const [previewExcel, setPreviewExcel] = useState(null); // { html, nombre } para Excel
   const messagesEndRef = useRef(null);
 
   // Auto-scroll al último mensaje
@@ -97,23 +98,46 @@ export default function Chat({ user, onLogout }) {
     }
   }
 
-  async function handlePreview(idManual, nombrePdf) {
+  async function handlePreview(idManual, nombreArchivo) {
+    const esExcel = nombreArchivo?.toLowerCase().endsWith('.xlsx') ||
+                    nombreArchivo?.toLowerCase().endsWith('.xls');
     try {
       const token = localStorage.getItem('luxo_token');
-      const res = await fetch(`/api/manuales/${idManual}/download`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
 
-      if (!res.ok) {
-        throw new Error('No se pudo cargar el PDF');
+      if (esExcel) {
+        // Excel: descargar binario y convertir a tabla HTML con SheetJS
+        const res = await fetch(`/api/manuales/${idManual}/download-excel`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('No se pudo cargar el Excel');
+
+        const arrayBuffer = await res.arrayBuffer();
+        // Importar SheetJS dinámicamente
+        const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+
+        // Construir HTML con todas las hojas como pestañas
+        const hojas = workbook.SheetNames.map((sheetName) => {
+          const ws = workbook.Sheets[sheetName];
+          const html = XLSX.utils.sheet_to_html(ws, { id: `sheet-${sheetName}` });
+          return { nombre: sheetName, html };
+        });
+
+        setPreviewExcel({ hojas, nombre: nombreArchivo, hojaActiva: 0, idManual });
+      } else {
+        // PDF: mostrar en iframe como antes
+        const res = await fetch(`/api/manuales/${idManual}/download`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('No se pudo cargar el PDF');
+
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        setPreviewPdf({ url, nombre: nombreArchivo || 'manual.pdf', idManual });
       }
-
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      setPreviewPdf({ url, nombre: nombrePdf || 'manual.pdf' });
     } catch (err) {
-      console.error('Error al previsualizar PDF:', err);
-      alert('Error al cargar la vista previa del PDF.');
+      console.error('Error al previsualizar:', err);
+      alert('Error al cargar la vista previa. Intenta de nuevo.');
     }
   }
 
@@ -122,6 +146,7 @@ export default function Chat({ user, onLogout }) {
       window.URL.revokeObjectURL(previewPdf.url);
     }
     setPreviewPdf(null);
+    setPreviewExcel(null);
   }
 
   function handleKeyDown(e) {
@@ -208,7 +233,7 @@ export default function Chat({ user, onLogout }) {
                 {msg.text}
               </div>
 
-              {/* PDF actions: preview + download */}
+              {/* Acciones del archivo: solo vista previa */}
               {msg.type === 'bot' && msg.id_manual && (
                 <div className="pdf-actions">
                   <button
@@ -216,12 +241,6 @@ export default function Chat({ user, onLogout }) {
                     onClick={() => handlePreview(msg.id_manual, msg.nombre_pdf)}
                   >
                     👁️ Vista previa: {msg.nombre_pdf}
-                  </button>
-                  <button
-                    className="download-btn"
-                    onClick={() => handleDownload(msg.id_manual, msg.nombre_pdf)}
-                  >
-                    📥 Descargar
                   </button>
                 </div>
               )}
@@ -314,6 +333,69 @@ export default function Chat({ user, onLogout }) {
               src={previewPdf.url}
               className="pdf-preview-iframe"
               title={previewPdf.nombre}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Excel Preview Modal */}
+      {previewExcel && (
+        <div className="modal-overlay" onClick={closePreview}>
+          <div className="pdf-preview-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="pdf-preview-header">
+              <span className="pdf-preview-title">📊 {previewExcel.nombre}</span>
+              <div className="pdf-preview-actions">
+                <button
+                  className="download-btn"
+                  onClick={async () => {
+                    const token = localStorage.getItem('luxo_token');
+                    const res = await fetch(`/api/manuales/${previewExcel.idManual}/download-excel`, {
+                      headers: { 'Authorization': `Bearer ${token}` },
+                    });
+                    const blob = await res.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = previewExcel.nombre;
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                  }}
+                >
+                  📥 Descargar
+                </button>
+                <button className="modal-close" onClick={closePreview}>✕</button>
+              </div>
+            </div>
+
+            {/* Pestañas por hoja */}
+            {previewExcel.hojas.length > 1 && (
+              <div style={{ display: 'flex', gap: '4px', padding: '8px 16px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
+                {previewExcel.hojas.map((h, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setPreviewExcel((p) => ({ ...p, hojaActiva: idx }))}
+                    style={{
+                      padding: '4px 12px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      fontWeight: previewExcel.hojaActiva === idx ? 700 : 400,
+                      background: previewExcel.hojaActiva === idx ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                      color: previewExcel.hojaActiva === idx ? '#fff' : 'var(--text-secondary)',
+                    }}
+                  >
+                    {h.nombre}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Tabla de la hoja activa */}
+            <div
+              className="pdf-preview-iframe"
+              style={{ overflow: 'auto', padding: '16px', background: '#fff' }}
+              dangerouslySetInnerHTML={{ __html: previewExcel.hojas[previewExcel.hojaActiva]?.html }}
             />
           </div>
         </div>

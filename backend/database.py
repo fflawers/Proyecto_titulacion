@@ -246,6 +246,79 @@ def obtener_pdf_binario(id_manual):
         db.close()
 
 
+def insertar_manual_excel(nombre_archivo, excel_binario, texto_extraido):
+    """Inserta un nuevo manual Excel en la BD. Retorna ID o None."""
+    db = conectar_db()
+    if not db:
+        return None
+    try:
+        cursor = db.cursor()
+        sql = """
+        INSERT INTO manuales
+        (Titulo, Nombre_Archivo, Archivo_Excel, Contenido_Texto, Categoria, Version, Tipo_Archivo)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(
+            sql,
+            (nombre_archivo, nombre_archivo, excel_binario, texto_extraido, "General", "1.0", "EXCEL"),
+        )
+        db.commit()
+        return cursor.lastrowid
+    except Exception as e:
+        print("ERROR INSERTAR MANUAL EXCEL:", e)
+        return None
+    finally:
+        db.close()
+
+
+def actualizar_manual_excel(id_manual, excel_binario, texto_extraido, nueva_version):
+    """Actualiza el Excel y texto de un manual existente."""
+    db = conectar_db()
+    if not db:
+        return False
+    try:
+        cursor = db.cursor()
+        cursor.execute(
+            """
+            UPDATE manuales
+            SET Archivo_Excel = %s, Contenido_Texto = %s, Version = %s
+            WHERE ID_Manual = %s
+            """,
+            (excel_binario, texto_extraido, nueva_version, id_manual),
+        )
+        db.commit()
+        return True
+    except Exception as e:
+        print("ERROR ACTUALIZAR MANUAL EXCEL:", e)
+        return False
+    finally:
+        db.close()
+
+
+def obtener_excel_binario(id_manual):
+    """Retorna nombre y binario del Excel para descarga."""
+    db = conectar_db()
+    if not db:
+        return None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT Nombre_Archivo, Archivo_Excel
+            FROM manuales
+            WHERE ID_Manual = %s
+            """,
+            (id_manual,),
+        )
+        return cursor.fetchone()
+    except Exception as e:
+        print("ERROR OBTENER EXCEL:", e)
+        return None
+    finally:
+        db.close()
+
+
+
 # =========================================
 # HISTORIAL DE CONVERSACIONES
 # =========================================

@@ -534,6 +534,38 @@ body {
   background: #fff;
 }
 
+/* Excel table styles (rendered by SheetJS inside the preview modal) */
+.pdf-preview-iframe table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  color: #1a1a2e;
+}
+
+.pdf-preview-iframe table td,
+.pdf-preview-iframe table th {
+  border: 1px solid #d1d5db;
+  padding: 6px 10px;
+  white-space: nowrap;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pdf-preview-iframe table tr:nth-child(even) {
+  background: #f3f4f6;
+}
+
+.pdf-preview-iframe table tr:first-child td,
+.pdf-preview-iframe table tr:first-child th {
+  background: #e5e7eb;
+  font-weight: 600;
+}
+
+.pdf-preview-iframe table tr:hover {
+  background: #dbeafe;
+}
+
 /* Chat Input Area */
 .chat-input-area {
   padding: 16px 24px;
