@@ -49,12 +49,21 @@ JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "8"))
 # =========================================
 
 EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
-CHUNK_SIZE = 500
-CHUNK_OVERLAP = 50
-TOP_K_RESULTS = 5
-RAG_RELEVANCE_THRESHOLD = 0.50  # Distancia coseno máxima para considerar un chunk relevante
-                                 # 0.38 era demasiado estricto para texto OCR (baja precisión semántica)
-                                 # Valores más bajos = más estricto (0=idéntico, 1=sin relación)
+CHUNK_SIZE = 1500      # Reducido para respetar el límite de 6000 TPM de Groq
+CHUNK_OVERLAP = 200    # Solapamiento adecuado
+TOP_K_RESULTS = 3      # Reducido a 3 para no exceder los tokens permitidos
+RAG_RELEVANCE_THRESHOLD = 0.55  # Ligeramente más permisivo para textos OCR
+                                 # (OCR genera embeddings menos perfectos que texto digital)
+
+
+# =========================================
+# OCR
+# =========================================
+
+OCR_DPI = 300                  # Resolución de renderizado (200 → 300 DPI = mucho mejor)
+OCR_MIN_CHARS = 200            # Si el PDF tiene menos chars → aplicar OCR
+OCR_LANG = "spa+eng"           # Idiomas soportados por Tesseract
+OCR_CONFIG = "--psm 3 --oem 3" # psm 3=auto, oem 3=LSTM neural (el más preciso)
 
 
 # =========================================

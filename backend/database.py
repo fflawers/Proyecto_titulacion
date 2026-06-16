@@ -28,7 +28,7 @@ def buscar_usuario(usuario):
         cursor = db.cursor(dictionary=True)
         cursor.execute(
             """
-            SELECT ID_Usuario, Nombre_Completo, Rol, Contrasena
+            SELECT ID_Usuario, Nombre_Completo, Rol, Contrasena, Tienda
             FROM usuarios
             WHERE Usuario = %s
             """,
@@ -95,7 +95,7 @@ def obtener_manuales():
         cursor.execute(
             """
             SELECT ID_Manual, Titulo, Nombre_Archivo, Version,
-                   Contenido_Texto, Categoria
+                   Contenido_Texto, Categoria, Tipo_Archivo
             FROM manuales
             ORDER BY Nombre_Archivo
             """
@@ -460,5 +460,241 @@ def guardar_feedback(id_conversacion, es_positivo):
         db.commit()
     except Exception as e:
         print("ERROR GUARDAR FEEDBACK:", e)
+    finally:
+        db.close()
+
+
+# =========================================
+# HISTORIAL DEL USUARIO (propio)
+# =========================================
+
+def obtener_historial_usuario(id_usuario, limite=50):
+    """Obtiene el historial completo de un usuario específico (para vista propia)."""
+    db = conectar_db()
+    if not db:
+        return []
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT
+                h.ID_Conversacion,
+                h.Pregunta_Usuario,
+                h.Respuesta_IA,
+                h.Fecha_Hora,
+                m.Nombre_Archivo AS nombre_manual,
+                f.Es_Positivo AS feedback
+            FROM historial_conversaciones h
+            LEFT JOIN manuales m ON h.ID_Manual = m.ID_Manual
+            LEFT JOIN feedback_respuestas f ON h.ID_Conversacion = f.ID_Conversacion
+            WHERE h.ID_Usuario = %s
+            ORDER BY h.Fecha_Hora DESC
+            LIMIT %s
+            """,
+            (id_usuario, limite),
+        )
+        rows = cursor.fetchall()
+        for row in rows:
+            if row.get("Fecha_Hora"):
+                row["Fecha_Hora"] = row["Fecha_Hora"].strftime("%Y-%m-%d %H:%M:%S")
+            if row.get("feedback") is not None:
+                row["feedback"] = bool(row["feedback"])
+        return rows
+    except Exception as e:
+        print("ERROR OBTENER HISTORIAL USUARIO:", e)
+        return []
+    finally:
+        db.close()
+
+
+# =========================================
+# PREGUNTAS SIN RESPUESTA (pendientes)
+# =========================================
+
+def obtener_pendientes(limite=200):
+    """Retorna las preguntas que LUXO no pudo responder (para revisión del admin)."""
+    db = conectar_db()
+    if not db:
+        return []
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT
+                p.ID_Pendiente,
+                p.Pregunta_Faltante,
+                p.Fecha_Registro,
+                p.Estatus,
+                u.Nombre_Completo AS nombre_usuario,
+                u.Usuario AS usuario,
+                u.Tienda AS tienda
+            FROM pendientes_actualizacion p
+            LEFT JOIN historial_conversaciones h ON p.ID_Conversacion = h.ID_Conversacion
+            LEFT JOIN usuarios u ON h.ID_Usuario = u.ID_Usuario
+            ORDER BY p.Fecha_Registro DESC
+            LIMIT %s
+            """,
+            (limite,),
+        )
+        rows = cursor.fetchall()
+        for row in rows:
+            if row.get("Fecha_Registro"):
+                row["Fecha_Registro"] = row["Fecha_Registro"].strftime("%Y-%m-%d %H:%M:%S")
+        return rows
+    except Exception as e:
+        print("ERROR OBTENER PENDIENTES:", e)
+        return []
+    finally:
+        db.close()
+
+
+# =========================================
+# ESTADÍSTICAS DE USO
+# =========================================
+
+def obtener_estadisticas():
+    """Retorna métricas de uso del sistema para el dashboard de admin."""
+    db = conectar_db()
+    if not db:
+        return {}
+    try:
+        cursor = db.cursor(dictionary=True)
+        stats = {}
+
+        # Totales de consultas
+        cursor.execute("""
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN DATE(Fecha_Hora) = CURDATE() THEN 1 ELSE 0 END) AS hoy,
+                SUM(CASE WHEN Fecha_Hora >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS semana,
+                SUM(CASE WHEN Fecha_Hora >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS mes
+            FROM historial_conversaciones
+        """)
+        totales = cursor.fetchone()
+        stats["consultas"] = {
+            "total": int(totales["total"] or 0),
+            "hoy": int(totales["hoy"] or 0),
+            "semana": int(totales["semana"] or 0),
+            "mes": int(totales["mes"] or 0),
+        }
+
+        # Usuarios únicos activos (últimos 30 días)
+        cursor.execute("""
+            SELECT COUNT(DISTINCT ID_Usuario) AS activos
+            FROM historial_conversaciones
+            WHERE Fecha_Hora >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        """)
+        stats["usuarios_activos"] = int((cursor.fetchone() or {}).get("activos", 0))
+
+        # Feedback positivo/negativo
+        cursor.execute("""
+            SELECT
+                SUM(CASE WHEN Es_Positivo = 1 THEN 1 ELSE 0 END) AS positivos,
+                SUM(CASE WHEN Es_Positivo = 0 THEN 1 ELSE 0 END) AS negativos,
+                COUNT(*) AS total_feedback
+            FROM feedback_respuestas
+        """)
+        fb = cursor.fetchone()
+        stats["feedback"] = {
+            "positivos": int(fb["positivos"] or 0),
+            "negativos": int(fb["negativos"] or 0),
+            "total": int(fb["total_feedback"] or 0),
+        }
+
+        # Top 5 manuales más consultados
+        cursor.execute("""
+            SELECT m.Nombre_Archivo AS nombre, COUNT(*) AS consultas
+            FROM historial_conversaciones h
+            JOIN manuales m ON h.ID_Manual = m.ID_Manual
+            WHERE h.ID_Manual IS NOT NULL
+            GROUP BY h.ID_Manual, m.Nombre_Archivo
+            ORDER BY consultas DESC
+            LIMIT 5
+        """)
+        stats["top_manuales"] = cursor.fetchall()
+        for row in stats["top_manuales"]:
+            row["consultas"] = int(row["consultas"])
+
+        # Top 5 usuarios más activos
+        cursor.execute("""
+            SELECT u.Nombre_Completo AS nombre, u.Tienda AS tienda, COUNT(*) AS consultas
+            FROM historial_conversaciones h
+            JOIN usuarios u ON h.ID_Usuario = u.ID_Usuario
+            GROUP BY h.ID_Usuario, u.Nombre_Completo, u.Tienda
+            ORDER BY consultas DESC
+            LIMIT 5
+        """)
+        stats["top_usuarios"] = cursor.fetchall()
+        for row in stats["top_usuarios"]:
+            row["consultas"] = int(row["consultas"])
+
+        # Preguntas sin respuesta
+        cursor.execute("SELECT COUNT(*) AS total FROM pendientes_actualizacion WHERE (Estatus IS NULL OR Estatus != 'Resuelto')")
+        stats["pendientes"] = int((cursor.fetchone() or {}).get("total", 0))
+
+        # Consultas por día (últimos 7 días)
+        cursor.execute("""
+            SELECT DATE(Fecha_Hora) AS dia, COUNT(*) AS consultas
+            FROM historial_conversaciones
+            WHERE Fecha_Hora >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+            GROUP BY DATE(Fecha_Hora)
+            ORDER BY dia ASC
+        """)
+        rows_dias = cursor.fetchall()
+        stats["consultas_por_dia"] = [
+            {"dia": str(r["dia"]), "consultas": int(r["consultas"])}
+            for r in rows_dias
+        ]
+
+        return stats
+    except Exception as e:
+        print("ERROR OBTENER ESTADISTICAS:", e)
+        return {}
+    finally:
+        db.close()
+
+
+# =========================================
+# USUARIOS ADMIN (gestión de tiendas)
+# =========================================
+
+def obtener_usuarios_admin():
+    """Retorna la lista de todos los usuarios con su tienda asignada."""
+    db = conectar_db()
+    if not db:
+        return []
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT ID_Usuario, Usuario, Nombre_Completo, Rol, Tienda
+            FROM usuarios
+            ORDER BY Nombre_Completo
+            """
+        )
+        return cursor.fetchall()
+    except Exception as e:
+        print("ERROR OBTENER USUARIOS ADMIN:", e)
+        return []
+    finally:
+        db.close()
+
+
+def actualizar_tienda_usuario(id_usuario, tienda):
+    """Asigna o actualiza la tienda de un usuario. Retorna True si éxito."""
+    db = conectar_db()
+    if not db:
+        return False
+    try:
+        cursor = db.cursor()
+        cursor.execute(
+            "UPDATE usuarios SET Tienda = %s WHERE ID_Usuario = %s",
+            (tienda, id_usuario),
+        )
+        db.commit()
+        return True
+    except Exception as e:
+        print("ERROR ACTUALIZAR TIENDA:", e)
+        return False
     finally:
         db.close()

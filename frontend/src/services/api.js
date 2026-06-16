@@ -164,3 +164,60 @@ export function clearSession() {
   localStorage.removeItem('luxo_nombre');
   localStorage.removeItem('luxo_rol');
 }
+
+
+// =========================================
+// HISTORIAL DEL USUARIO PROPIO
+// =========================================
+
+export async function obtenerHistorialPropio(limite = 50) {
+  const res = await fetch(`${API_URL}/api/historial/me?limite=${limite}`, {
+    headers: getHeaders(),
+  });
+  return handleResponse(res);
+}
+
+
+// =========================================
+// ADMIN — PENDIENTES, ESTADÍSTICAS, USUARIOS
+// =========================================
+
+export async function obtenerPendientes(limite = 200) {
+  const res = await fetch(
+    `${API_URL}/api/admin/pendientes?limite=${limite}`,
+    { headers: getHeaders() }
+  );
+  return handleResponse(res);
+}
+
+export async function obtenerEstadisticas() {
+  const res = await fetch(`${API_URL}/api/admin/estadisticas`, {
+    headers: getHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export async function obtenerUsuariosAdmin() {
+  const res = await fetch(`${API_URL}/api/admin/usuarios`, {
+    headers: getHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export async function actualizarTiendaUsuario(id, tienda) {
+  const res = await fetch(`${API_URL}/api/admin/usuarios/${id}/tienda`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ tienda }),
+  });
+  return handleResponse(res);
+}
+
+export async function reindexarManuales() {
+  const res = await fetch(`${API_URL}/api/admin/reindexar`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+  return handleResponse(res);
+}
+

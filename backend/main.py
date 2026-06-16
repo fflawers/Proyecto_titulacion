@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import Response
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from urllib.parse import quote
 
 import auth
@@ -26,6 +26,11 @@ app = FastAPI(
     description="API del asistente inteligente de Sunglass Hut",
     version="2.0.0",
 )
+
+# Límite de tamaño de archivos subidos: 50 MB
+# (suficiente para cualquier Excel/PDF operativo de Sunglass Hut)
+MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB en bytes
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -129,7 +134,7 @@ def login_endpoint(req: LoginRequest):
 
 @app.get("/api/auth/me")
 def me_endpoint(user=Depends(get_current_user)):
-    """Retorna la info del usuario autenticado."""
+    """Retorna la info del usuario autenticado, incluida su tienda."""
     return user
 
 
@@ -192,23 +197,32 @@ async def upload_manual(
     archivo: UploadFile = File(...),
     user=Depends(require_admin),
 ):
-    """Sube un nuevo manual PDF o Excel (solo admin)."""
+    """Sube un nuevo manual PDF, Excel o imagen (solo admin)."""
     nombre = archivo.filename.lower()
-    es_pdf = nombre.endswith(".pdf")
+    es_pdf   = nombre.endswith(".pdf")
     es_excel = nombre.endswith(".xlsx") or nombre.endswith(".xls")
+    es_imagen = nombre.endswith(".jpg") or nombre.endswith(".jpeg") or nombre.endswith(".png")
 
-    if not es_pdf and not es_excel:
+    if not es_pdf and not es_excel and not es_imagen:
         raise HTTPException(
             status_code=400,
-            detail="Solo se permiten archivos PDF (.pdf) o Excel (.xlsx, .xls)",
+            detail="Solo se permiten archivos PDF (.pdf), Excel (.xlsx, .xls) o imagen (.jpg, .png)",
         )
 
     contenido = await archivo.read()
 
+    if len(contenido) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"El archivo supera el límite de {MAX_UPLOAD_SIZE // (1024*1024)} MB.",
+        )
+
     if es_pdf:
         exito, mensaje = pdf_manager.cargar_pdf(archivo.filename, contenido)
-    else:
+    elif es_excel:
         exito, mensaje = excel_manager.cargar_excel(archivo.filename, contenido)
+    else:  # imagen
+        exito, mensaje = pdf_manager.cargar_imagen(archivo.filename, contenido)
 
     if not exito:
         raise HTTPException(status_code=400, detail=mensaje)
@@ -221,28 +235,64 @@ async def update_manual(
     archivo: UploadFile = File(...),
     user=Depends(require_admin),
 ):
-    """Actualiza un manual PDF o Excel existente (solo admin)."""
+    """Actualiza un manual PDF, Excel o imagen existente (solo admin)."""
     nombre = archivo.filename.lower()
-    es_pdf = nombre.endswith(".pdf")
+    es_pdf   = nombre.endswith(".pdf")
     es_excel = nombre.endswith(".xlsx") or nombre.endswith(".xls")
+    es_imagen = nombre.endswith(".jpg") or nombre.endswith(".jpeg") or nombre.endswith(".png")
 
-    if not es_pdf and not es_excel:
+    if not es_pdf and not es_excel and not es_imagen:
         raise HTTPException(
             status_code=400,
-            detail="Solo se permiten archivos PDF (.pdf) o Excel (.xlsx, .xls)",
+            detail="Solo se permiten archivos PDF (.pdf), Excel (.xlsx, .xls) o imagen (.jpg, .png)",
         )
 
     contenido = await archivo.read()
 
+    if len(contenido) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"El archivo supera el límite de {MAX_UPLOAD_SIZE // (1024*1024)} MB.",
+        )
+
     if es_pdf:
         exito, mensaje = pdf_manager.actualizar_pdf(archivo.filename, contenido)
-    else:
+    elif es_excel:
         exito, mensaje = excel_manager.actualizar_excel(archivo.filename, contenido)
+    else:  # imagen
+        exito, mensaje = pdf_manager.cargar_imagen(archivo.filename, contenido)
 
     if not exito:
         raise HTTPException(status_code=400, detail=mensaje)
 
     return MessageResponse(message=mensaje, success=True)
+
+
+# =========================================
+# ENDPOINTS — ADMIN: RE-INDEXAR
+# =========================================
+
+@app.post("/api/admin/reindexar")
+def reindexar_manuales(user=Depends(require_admin)):
+    """
+    Re-indexa todos los manuales existentes con el pipeline mejorado.
+    Útil después de actualizar los parámetros de chunking o el modelo de embeddings.
+    Solo admin.
+    """
+    import vector_store as vs
+    try:
+        vs.reindexar_todos()
+        coleccion = vs.obtener_coleccion()
+        total_chunks = coleccion.count()
+        manuales = database.obtener_manuales()
+        return {
+            "success": True,
+            "message": f"Re-indexación completada: {len(manuales)} manuales, {total_chunks} chunks.",
+            "total_manuales": len(manuales),
+            "total_chunks": total_chunks,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error en re-indexación: {e}")
 
 
 @app.delete("/api/manuales/{id_manual}", response_model=MessageResponse)
@@ -295,6 +345,17 @@ def download_excel(id_manual: int, user=Depends(get_current_user)):
 
 
 # =========================================
+# ENDPOINTS — HISTORIAL DEL USUARIO
+# =========================================
+
+@app.get("/api/historial/me")
+def historial_propio(limite: int = 50, user=Depends(get_current_user)):
+    """Retorna el historial de consultas del usuario autenticado."""
+    historial = database.obtener_historial_usuario(user["id"], limite)
+    return historial
+
+
+# =========================================
 # ENDPOINTS — ADMIN: HISTORIAL DE CONSULTAS
 # =========================================
 
@@ -324,6 +385,59 @@ def admin_historial(
 
 
 # =========================================
+# ENDPOINTS — ADMIN: PENDIENTES (sin respuesta)
+# =========================================
+
+@app.get("/api/admin/pendientes")
+def admin_pendientes(
+    limite: int = 200,
+    user=Depends(require_admin),
+):
+    """Retorna preguntas que LUXO no pudo responder (solo admin)."""
+    pendientes = database.obtener_pendientes(limite)
+    return pendientes
+
+
+# =========================================
+# ENDPOINTS — ADMIN: ESTADÍSTICAS
+# =========================================
+
+@app.get("/api/admin/estadisticas")
+def admin_estadisticas(user=Depends(require_admin)):
+    """Retorna estadísticas de uso del sistema (solo admin)."""
+    stats = database.obtener_estadisticas()
+    return stats
+
+
+# =========================================
+# ENDPOINTS — ADMIN: USUARIOS / TIENDAS
+# =========================================
+
+class ActualizarTiendaRequest(BaseModel):
+    tienda: str
+
+
+@app.get("/api/admin/usuarios")
+def admin_usuarios(user=Depends(require_admin)):
+    """Lista todos los usuarios con su tienda asignada (solo admin)."""
+    usuarios = database.obtener_usuarios_admin()
+    return usuarios
+
+
+@app.put("/api/admin/usuarios/{id_usuario}/tienda")
+def actualizar_tienda(
+    id_usuario: int,
+    req: ActualizarTiendaRequest,
+    user=Depends(require_admin),
+):
+    """Actualiza la tienda asignada a un usuario (solo admin)."""
+    exito = database.actualizar_tienda_usuario(id_usuario, req.tienda)
+    if not exito:
+        raise HTTPException(status_code=500, detail="No se pudo actualizar la tienda")
+    return {"message": "Tienda actualizada correctamente", "success": True}
+
+
+# =========================================
 # HEALTH CHECK
 # =========================================
 
@@ -331,3 +445,4 @@ def admin_historial(
 def health():
     """Health check del servidor."""
     return {"status": "ok", "service": "LUXO API"}
+

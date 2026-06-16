@@ -124,25 +124,114 @@ def dividir_en_chunks(texto, chunk_size=None, overlap=None):
 
 
 # =========================================
+# CHUNKING ESPECIALIZADO PARA EXCEL
+# =========================================
+
+def dividir_en_chunks_excel(texto: str, chunk_size: int = 2000) -> list[str]:
+    """
+    Chunking inteligente para texto extraído de Excel.
+
+    Estrategia:
+    - Divide por sección de hoja (=== Hoja: ... ===)
+    - Dentro de cada hoja, agrupa filas en chunks de chunk_size chars
+    - Cada chunk incluye la línea de encabezado de columnas al inicio
+      para que el LLM tenga siempre el contexto de "qué columna es qué"
+    - Nunca corta a la mitad una fila de datos
+
+    Args:
+        texto: Texto extraído por excel_manager
+        chunk_size: Máximo de caracteres por chunk (default 1200)
+
+    Returns:
+        Lista de chunks con contexto completo
+    """
+    if not texto or not texto.strip():
+        return []
+
+    chunks = []
+    # Dividir por hojas
+    secciones = []
+    seccion_actual = []
+    for linea in texto.split("\n"):
+        if linea.startswith("=== Hoja:") and seccion_actual:
+            secciones.append("\n".join(seccion_actual))
+            seccion_actual = [linea]
+        else:
+            seccion_actual.append(linea)
+    if seccion_actual:
+        secciones.append("\n".join(seccion_actual))
+
+    for seccion in secciones:
+        lineas = seccion.split("\n")
+        if not lineas:
+            continue
+
+        # Extraer cabecera de hoja y línea de columnas
+        cabecera_hoja = ""
+        columnas_header = ""
+        datos_inicio = 0
+
+        for i, linea in enumerate(lineas):
+            if linea.startswith("=== Hoja:"):
+                cabecera_hoja = linea
+                datos_inicio = i + 1
+            elif linea.startswith("Columnas:"):
+                columnas_header = linea
+                datos_inicio = i + 1
+                break
+
+        prefijo = "\n".join(filter(None, [cabecera_hoja, columnas_header]))
+        filas_datos = lineas[datos_inicio:]
+
+        # Agrupar filas en chunks respetando el límite de chars
+        chunk_filas = []
+        chunk_chars = len(prefijo)
+
+        for fila in filas_datos:
+            fila = fila.strip()
+            if not fila:
+                continue
+
+            if chunk_chars + len(fila) + 1 > chunk_size and chunk_filas:
+                # Cerrar chunk actual
+                chunks.append(prefijo + "\n" + "\n".join(chunk_filas))
+                chunk_filas = [fila]
+                chunk_chars = len(prefijo) + len(fila)
+            else:
+                chunk_filas.append(fila)
+                chunk_chars += len(fila) + 1
+
+        if chunk_filas:
+            chunks.append(prefijo + "\n" + "\n".join(chunk_filas))
+
+    return chunks if chunks else [texto[:2000]]  # fallback
+
+
+# =========================================
 # INDEXAR MANUAL
 # =========================================
 
-def indexar_manual(id_manual, nombre_archivo, texto):
+def indexar_manual(id_manual: int, nombre_archivo: str, texto: str, tipo: str = "pdf"):
     """
     Divide el texto de un manual en chunks, genera embeddings,
     y los almacena en ChromaDB.
 
     Args:
         id_manual: ID del manual en MySQL
-        nombre_archivo: Nombre del archivo PDF
-        texto: Texto extraído completo del PDF
+        nombre_archivo: Nombre del archivo
+        texto: Texto extraído completo
+        tipo: 'pdf' o 'excel' — determina la estrategia de chunking
     """
     collection = obtener_coleccion()
 
     # Primero eliminar chunks anteriores de este manual (si es actualización)
     eliminar_manual(id_manual)
 
-    chunks = dividir_en_chunks(texto)
+    # Seleccionar estrategia de chunking según el tipo de archivo
+    if tipo == "excel":
+        chunks = dividir_en_chunks_excel(texto)
+    else:
+        chunks = dividir_en_chunks(texto)
 
     if not chunks:
         print(f"⚠️  No se generaron chunks para el manual {nombre_archivo}")
@@ -157,6 +246,7 @@ def indexar_manual(id_manual, nombre_archivo, texto):
             "nombre_archivo": nombre_archivo,
             "chunk_index": i,
             "total_chunks": len(chunks),
+            "tipo": tipo,
         }
         for i in range(len(chunks))
     ]
@@ -168,7 +258,8 @@ def indexar_manual(id_manual, nombre_archivo, texto):
         metadatas=metadatas,
     )
 
-    print(f"✅ Manual '{nombre_archivo}' indexado: {len(chunks)} chunks")
+    print(f"✅ Manual '{nombre_archivo}' indexado: {len(chunks)} chunks ({tipo})")
+
 
 
 # =========================================
@@ -284,9 +375,13 @@ def buscar_por_nombre_archivo(nombre_parcial, top_k=None):
 def reindexar_todos():
     """
     Re-indexa todos los manuales existentes en MySQL.
-    Útil para primera ejecución o si cambian los parámetros de chunking.
+    Extrae el texto nuevamente del archivo original (binario) para aplicar
+    los nuevos algoritmos de limpieza y formateo (ej. formato 'Columna: valor' en Excel),
+    actualiza la base de datos con el nuevo texto y re-indexa en ChromaDB.
     """
     import database
+    import pdf_manager
+    import excel_manager
 
     manuales = database.obtener_manuales()
     if not manuales:
@@ -296,14 +391,39 @@ def reindexar_todos():
     print(f"🔄 Re-indexando {len(manuales)} manuales...")
 
     for manual in manuales:
-        texto = manual.get("Contenido_Texto") or ""
-        nombre = manual.get("Nombre_Archivo") or manual.get("Titulo") or ""
         id_manual = manual["ID_Manual"]
+        nombre = manual.get("Nombre_Archivo") or manual.get("Titulo") or ""
+        tipo_str = manual.get("Tipo_Archivo") or "PDF"
+        tipo = tipo_str.lower()
+        texto = ""
 
-        if texto.strip():
-            indexar_manual(id_manual, nombre, texto)
-        else:
-            print(f"⚠️  Manual '{nombre}' no tiene texto, saltando...")
+        try:
+            if tipo == "excel":
+                datos = database.obtener_excel_binario(id_manual)
+                if datos and datos.get("Archivo_Excel"):
+                    # Re-extraer usando el nuevo algoritmo inteligente
+                    texto = excel_manager.extraer_texto_excel_bytes(datos["Archivo_Excel"])
+                    # Actualizar el texto extraído en la base de datos
+                    version = manual.get("Version") or "1.0"
+                    database.actualizar_manual_excel(id_manual, datos["Archivo_Excel"], texto, version)
+                else:
+                    texto = manual.get("Contenido_Texto") or ""
+            else:
+                datos = database.obtener_pdf_binario(id_manual)
+                if datos and datos.get("Archivo_PDF"):
+                    # Re-extraer usando el nuevo OCR / algoritmo de limpieza
+                    texto = pdf_manager.extraer_texto_pdf_bytes(datos["Archivo_PDF"])
+                    version = manual.get("Version") or "1.0"
+                    database.actualizar_manual_pdf(id_manual, datos["Archivo_PDF"], texto, version)
+                else:
+                    texto = manual.get("Contenido_Texto") or ""
+
+            if texto.strip():
+                indexar_manual(id_manual, nombre, texto, tipo)
+            else:
+                print(f"⚠️  Manual '{nombre}' no tiene texto útil extraído, saltando...")
+        except Exception as e:
+            print(f"❌ Error reindexando {nombre}: {e}")
 
     print(f"✅ Re-indexación completada — {obtener_coleccion().count()} chunks totales")
 

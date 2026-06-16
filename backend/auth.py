@@ -50,6 +50,7 @@ def crear_token(user_data):
         "sub": str(user_data["id"]),
         "nombre": user_data["nombre"],
         "rol": user_data["rol"],
+        "tienda": user_data.get("tienda") or "",
         "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -68,6 +69,7 @@ def verificar_token(token):
             "id": int(payload["sub"]),
             "nombre": payload["nombre"],
             "rol": payload["rol"],
+            "tienda": payload.get("tienda") or "",
         }
     except JWTError:
         return None
@@ -98,6 +100,7 @@ def login(usuario, contrasena):
                 "id": datos["ID_Usuario"],
                 "nombre": datos["Nombre_Completo"],
                 "rol": datos["Rol"],
+                "tienda": datos.get("Tienda") or "",
             }
         return None
 
@@ -111,6 +114,7 @@ def login(usuario, contrasena):
             "id": datos["ID_Usuario"],
             "nombre": datos["Nombre_Completo"],
             "rol": datos["Rol"],
+            "tienda": datos.get("Tienda") or "",
         }
 
     return None

@@ -1,14 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
 import { enviarMensaje, enviarFeedback, clearSession } from '../services/api';
+import { t, getLang, setLang } from '../services/i18n';
 import AdminPanel from '../components/AdminPanel';
+import HistorialPanel from '../components/HistorialPanel';
 
 export default function Chat({ user, onLogout }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
-  const [previewPdf, setPreviewPdf] = useState(null);   // { url, nombre } para PDF
-  const [previewExcel, setPreviewExcel] = useState(null); // { html, nombre } para Excel
+  const [showHistorial, setShowHistorial] = useState(false);
+  const [previewPdf, setPreviewPdf] = useState(null);
+  const [previewExcel, setPreviewExcel] = useState(null);
+  const [lang, setLangState] = useState(getLang());
   const messagesEndRef = useRef(null);
 
   // Auto-scroll al último mensaje
@@ -21,12 +25,17 @@ export default function Chat({ user, onLogout }) {
     onLogout();
   }
 
+  function toggleLang() {
+    const newLang = lang === 'es' ? 'en' : 'es';
+    setLang(newLang);
+    setLangState(newLang);
+  }
+
   async function handleSend(e) {
     e?.preventDefault();
     const pregunta = input.trim();
     if (!pregunta || thinking) return;
 
-    // Agregar mensaje del usuario
     setMessages((prev) => [...prev, { type: 'user', text: pregunta }]);
     setInput('');
     setThinking(true);
@@ -79,9 +88,7 @@ export default function Chat({ user, onLogout }) {
         headers: { 'Authorization': `Bearer ${token}` },
       });
 
-      if (!res.ok) {
-        throw new Error('No se pudo descargar el PDF');
-      }
+      if (!res.ok) throw new Error('No se pudo descargar el PDF');
 
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
@@ -105,18 +112,15 @@ export default function Chat({ user, onLogout }) {
       const token = localStorage.getItem('luxo_token');
 
       if (esExcel) {
-        // Excel: descargar binario y convertir a tabla HTML con SheetJS
         const res = await fetch(`/api/manuales/${idManual}/download-excel`, {
           headers: { 'Authorization': `Bearer ${token}` },
         });
         if (!res.ok) throw new Error('No se pudo cargar el Excel');
 
         const arrayBuffer = await res.arrayBuffer();
-        // Importar SheetJS dinámicamente
         const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
 
-        // Construir HTML con todas las hojas como pestañas
         const hojas = workbook.SheetNames.map((sheetName) => {
           const ws = workbook.Sheets[sheetName];
           const html = XLSX.utils.sheet_to_html(ws, { id: `sheet-${sheetName}` });
@@ -125,7 +129,6 @@ export default function Chat({ user, onLogout }) {
 
         setPreviewExcel({ hojas, nombre: nombreArchivo, hojaActiva: 0, idManual });
       } else {
-        // PDF: mostrar en iframe como antes
         const res = await fetch(`/api/manuales/${idManual}/download`, {
           headers: { 'Authorization': `Bearer ${token}` },
         });
@@ -142,9 +145,7 @@ export default function Chat({ user, onLogout }) {
   }
 
   function closePreview() {
-    if (previewPdf?.url) {
-      window.URL.revokeObjectURL(previewPdf.url);
-    }
+    if (previewPdf?.url) window.URL.revokeObjectURL(previewPdf.url);
     setPreviewPdf(null);
     setPreviewExcel(null);
   }
@@ -156,7 +157,6 @@ export default function Chat({ user, onLogout }) {
     }
   }
 
-  // Obtener iniciales para avatar
   const initials = user.nombre
     .split(' ')
     .map((w) => w[0])
@@ -178,22 +178,58 @@ export default function Chat({ user, onLogout }) {
           <div>
             <div className="chat-header-title">LUXO</div>
             <div className="chat-header-subtitle">
-              Bienvenido, {user.nombre}
+              {t('header_welcome')} {user.nombre}
+              {user.tienda && (
+                <span style={{
+                  marginLeft: '8px',
+                  fontSize: '11px',
+                  padding: '1px 7px',
+                  borderRadius: '20px',
+                  background: 'rgba(139,92,246,0.18)',
+                  color: 'var(--accent-tertiary)',
+                  border: '1px solid rgba(139,92,246,0.25)',
+                  fontWeight: 500,
+                  verticalAlign: 'middle',
+                }}>
+                  🏪 {user.tienda}
+                </span>
+              )}
             </div>
           </div>
         </div>
 
         <div className="chat-header-right">
+          {/* Toggle idioma */}
+          <button
+            id="btn-lang-toggle"
+            className="btn-admin"
+            onClick={toggleLang}
+            title={lang === 'es' ? 'Switch to English' : 'Cambiar a Español'}
+            style={{ minWidth: '52px', fontWeight: 700, letterSpacing: '0.5px' }}
+          >
+            🌐 {lang === 'es' ? 'EN' : 'ES'}
+          </button>
+
+          {/* Historial del usuario */}
+          <button
+            id="btn-historial-propio"
+            className="btn-admin"
+            onClick={() => setShowHistorial(true)}
+          >
+            {t('header_history')}
+          </button>
+
           {user.rol === 'Admin' && (
             <button
+              id="btn-admin-panel"
               className="btn-admin"
               onClick={() => setShowAdmin(true)}
             >
-              ⚙️ Admin
+              {t('header_admin')}
             </button>
           )}
-          <button className="btn-logout" onClick={handleLogout}>
-            Cerrar Sesión
+          <button id="btn-logout" className="btn-logout" onClick={handleLogout}>
+            {t('header_logout')}
           </button>
         </div>
       </header>
@@ -212,10 +248,10 @@ export default function Chat({ user, onLogout }) {
           }}>
             <div style={{ fontSize: '48px' }}>🕶️</div>
             <div style={{ fontSize: '18px', fontWeight: 600, color: 'var(--accent-tertiary)' }}>
-              ¡Hola! Soy LUXO
+              {t('chat_empty_title')}
             </div>
             <div style={{ fontSize: '14px', color: 'var(--text-muted)', textAlign: 'center', maxWidth: '400px' }}>
-              Tu asistente inteligente de Sunglass Hut. Pregúntame lo que necesites sobre los manuales operativos.
+              {t('chat_empty_sub')}
             </div>
           </div>
         )}
@@ -240,7 +276,7 @@ export default function Chat({ user, onLogout }) {
                     className="preview-btn"
                     onClick={() => handlePreview(msg.id_manual, msg.nombre_pdf)}
                   >
-                    👁️ Vista previa: {msg.nombre_pdf}
+                    {t('chat_preview')} {msg.nombre_pdf}
                   </button>
                 </div>
               )}
@@ -278,7 +314,7 @@ export default function Chat({ user, onLogout }) {
                 <span></span>
                 <span></span>
               </div>
-              LUXO está pensando...
+              {t('chat_thinking')}
             </div>
           </div>
         )}
@@ -290,8 +326,9 @@ export default function Chat({ user, onLogout }) {
       <div className="chat-input-area">
         <div className="chat-input-wrapper">
           <textarea
+            id="chat-input"
             className="chat-input"
-            placeholder="Escribe tu consulta..."
+            placeholder={t('chat_placeholder')}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -299,11 +336,12 @@ export default function Chat({ user, onLogout }) {
             disabled={thinking}
           />
           <button
+            id="btn-send"
             className="btn-send"
             onClick={handleSend}
             disabled={!input.trim() || thinking}
           >
-            Enviar
+            {t('chat_send')}
           </button>
         </div>
       </div>
@@ -324,7 +362,7 @@ export default function Chat({ user, onLogout }) {
                     a.click();
                   }}
                 >
-                  📥 Descargar
+                  {t('chat_download')}
                 </button>
                 <button className="modal-close" onClick={closePreview}>✕</button>
               </div>
@@ -361,13 +399,12 @@ export default function Chat({ user, onLogout }) {
                     window.URL.revokeObjectURL(url);
                   }}
                 >
-                  📥 Descargar
+                  {t('chat_download')}
                 </button>
                 <button className="modal-close" onClick={closePreview}>✕</button>
               </div>
             </div>
 
-            {/* Pestañas por hoja */}
             {previewExcel.hojas.length > 1 && (
               <div style={{ display: 'flex', gap: '4px', padding: '8px 16px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
                 {previewExcel.hojas.map((h, idx) => (
@@ -391,7 +428,6 @@ export default function Chat({ user, onLogout }) {
               </div>
             )}
 
-            {/* Tabla de la hoja activa */}
             <div
               className="pdf-preview-iframe"
               style={{ overflow: 'auto', padding: '16px', background: '#fff' }}
@@ -399,6 +435,11 @@ export default function Chat({ user, onLogout }) {
             />
           </div>
         </div>
+      )}
+
+      {/* Historial Panel */}
+      {showHistorial && (
+        <HistorialPanel onClose={() => setShowHistorial(false)} />
       )}
 
       {/* Admin Panel Modal */}
