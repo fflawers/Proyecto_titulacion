@@ -1,10 +1,5 @@
-// =========================================
-// i18n.js — Internacionalización ES / EN
-// =========================================
-
 const translations = {
   es: {
-    // Login
     login_title: 'Bienvenido a LUXO',
     login_subtitle: 'Asistente inteligente de Sunglass Hut',
     login_user: 'Usuario',
@@ -13,14 +8,10 @@ const translations = {
     login_loading: 'Verificando...',
     login_user_placeholder: 'Tu usuario',
     login_password_placeholder: 'Tu contraseña',
-
-    // Header
     header_welcome: 'Bienvenido,',
     header_admin: '⚙️ Admin',
     header_history: '📋 Mi Historial',
     header_logout: 'Cerrar Sesión',
-
-    // Chat
     chat_placeholder: 'Escribe tu consulta...',
     chat_send: 'Enviar',
     chat_thinking: 'LUXO está pensando...',
@@ -28,23 +19,17 @@ const translations = {
     chat_empty_sub: 'Tu asistente inteligente de Sunglass Hut. Pregúntame lo que necesites sobre los manuales operativos.',
     chat_preview: '👁️ Vista previa:',
     chat_download: '📥 Descargar',
-
-    // Historial panel
     history_title: 'Mi Historial',
     history_empty: 'Aún no tienes consultas registradas.',
     history_loading: 'Cargando historial...',
     history_answer_label: 'Respuesta de LUXO:',
     history_manual: '📄 Manual:',
-
-    // Admin panel
     admin_title: '⚙️ Panel de Administración',
     admin_tab_manuals: '📚 Manuales',
     admin_tab_history: '📋 Historial',
     admin_tab_pending: '⚠️ Sin Respuesta',
     admin_tab_stats: '📊 Estadísticas',
     admin_tab_users: '👥 Usuarios',
-
-    // Manuales
     admin_upload_new: '📤 Cargar Nuevo',
     admin_update: '🔄 Actualizar',
     admin_processing: 'Procesando archivo...',
@@ -55,8 +40,6 @@ const translations = {
     admin_no_manuals: 'No hay manuales cargados',
     admin_delete: '🗑️ Borrar',
     admin_delete_confirm: '¿Seguro que deseas borrar',
-
-    // Historial admin
     admin_history_lock_title: 'Acceso Restringido',
     admin_history_lock_text: 'Ingresa la contraseña de desarrollador para ver el historial de consultas.',
     admin_history_password_placeholder: 'Contraseña...',
@@ -74,15 +57,11 @@ const translations = {
     admin_history_no_results: 'No se encontraron resultados',
     admin_history_empty: 'No hay consultas registradas',
     admin_history_answer: 'Respuesta de LUXO:',
-
-    // Pendientes
     admin_pending_loading: '⏳ Cargando preguntas sin respuesta...',
     admin_pending_empty: '✅ No hay preguntas sin respuesta. ¡LUXO lo está haciendo bien!',
     admin_pending_total: 'preguntas sin respuesta',
     admin_pending_store: '🏪 Tienda:',
     admin_pending_user: '👤',
-
-    // Estadísticas
     stats_total: 'Total Consultas',
     stats_today: 'Hoy',
     stats_week: 'Esta Semana',
@@ -96,8 +75,6 @@ const translations = {
     stats_queries: 'consultas',
     stats_loading: '⏳ Cargando estadísticas...',
     stats_last_30: '(últimos 30 días)',
-
-    // Usuarios
     users_loading: '⏳ Cargando usuarios...',
     users_empty: 'No hay usuarios registrados.',
     users_store_placeholder: 'Asignar tienda...',
@@ -106,11 +83,9 @@ const translations = {
     users_total: 'usuarios registrados',
     users_role: 'Rol:',
     users_store: 'Tienda:',
-    users_no_store: 'Sin tienda asignada',
+    users_no_store: 'Sin tienda asignada'
   },
-
   en: {
-    // Login
     login_title: 'Welcome to LUXO',
     login_subtitle: 'Sunglass Hut Smart Assistant',
     login_user: 'Username',
@@ -119,14 +94,10 @@ const translations = {
     login_loading: 'Verifying...',
     login_user_placeholder: 'Your username',
     login_password_placeholder: 'Your password',
-
-    // Header
     header_welcome: 'Welcome,',
     header_admin: '⚙️ Admin',
     header_history: '📋 My History',
     header_logout: 'Sign Out',
-
-    // Chat
     chat_placeholder: 'Type your question...',
     chat_send: 'Send',
     chat_thinking: 'LUXO is thinking...',
@@ -134,23 +105,17 @@ const translations = {
     chat_empty_sub: 'Your Sunglass Hut smart assistant. Ask me anything about the operational manuals.',
     chat_preview: '👁️ Preview:',
     chat_download: '📥 Download',
-
-    // Historial panel
     history_title: 'My History',
     history_empty: 'No queries registered yet.',
     history_loading: 'Loading history...',
     history_answer_label: 'LUXO\'s answer:',
     history_manual: '📄 Manual:',
-
-    // Admin panel
     admin_title: '⚙️ Admin Panel',
     admin_tab_manuals: '📚 Manuals',
     admin_tab_history: '📋 History',
     admin_tab_pending: '⚠️ Unanswered',
     admin_tab_stats: '📊 Statistics',
     admin_tab_users: '👥 Users',
-
-    // Manuales
     admin_upload_new: '📤 Upload New',
     admin_update: '🔄 Update',
     admin_processing: 'Processing file...',
@@ -161,8 +126,6 @@ const translations = {
     admin_no_manuals: 'No manuals loaded',
     admin_delete: '🗑️ Delete',
     admin_delete_confirm: 'Are you sure you want to delete',
-
-    // Historial admin
     admin_history_lock_title: 'Restricted Access',
     admin_history_lock_text: 'Enter the developer password to view the query history.',
     admin_history_password_placeholder: 'Password...',
@@ -180,15 +143,11 @@ const translations = {
     admin_history_no_results: 'No results found',
     admin_history_empty: 'No queries registered',
     admin_history_answer: 'LUXO\'s answer:',
-
-    // Pendientes
     admin_pending_loading: '⏳ Loading unanswered questions...',
     admin_pending_empty: '✅ No unanswered questions. LUXO is doing great!',
     admin_pending_total: 'unanswered questions',
     admin_pending_store: '🏪 Store:',
     admin_pending_user: '👤',
-
-    // Estadísticas
     stats_total: 'Total Queries',
     stats_today: 'Today',
     stats_week: 'This Week',
@@ -202,8 +161,6 @@ const translations = {
     stats_queries: 'queries',
     stats_loading: '⏳ Loading statistics...',
     stats_last_30: '(last 30 days)',
-
-    // Usuarios
     users_loading: '⏳ Loading users...',
     users_empty: 'No users registered.',
     users_store_placeholder: 'Assign store...',
@@ -212,26 +169,274 @@ const translations = {
     users_total: 'registered users',
     users_role: 'Role:',
     users_store: 'Store:',
-    users_no_store: 'No store assigned',
+    users_no_store: 'No store assigned'
   },
+  pt: {
+    login_title: 'Bem-vindo ao LUXO',
+    login_subtitle: 'Assistente Inteligente da Sunglass Hut',
+    login_user: 'Usuário',
+    login_password: 'Senha',
+    login_btn: 'Entrar',
+    login_loading: 'Verificando...',
+    login_user_placeholder: 'Seu usuário',
+    login_password_placeholder: 'Sua senha',
+    header_welcome: 'Bem-vindo(a),',
+    header_admin: '⚙️ Admin',
+    header_history: '📋 Meu Histórico',
+    header_logout: 'Sair',
+    chat_placeholder: 'Digite sua pergunta...',
+    chat_send: 'Enviar',
+    chat_thinking: 'LUXO está pensando...',
+    chat_empty_title: 'Olá! Sou o LUXO',
+    chat_empty_sub: 'Seu assistente inteligente. Pergunte-me qualquer coisa sobre os manuais operacionais.',
+    chat_preview: '👁️ Visualização:',
+    chat_download: '📥 Baixar',
+    history_title: 'Meu Histórico',
+    history_empty: 'Nenhuma consulta registrada ainda.',
+    history_loading: 'Carregando histórico...',
+    history_answer_label: 'Resposta do LUXO:',
+    history_manual: '📄 Manual:',
+    admin_title: '⚙️ Painel de Administração',
+    admin_tab_manuals: '📚 Manuais',
+    admin_tab_history: '📋 Histórico',
+    admin_tab_pending: '⚠️ Sem Resposta',
+    admin_tab_stats: '📊 Estatísticas',
+    admin_tab_users: '👥 Usuários',
+    admin_upload_new: '📤 Enviar Novo',
+    admin_update: '🔄 Atualizar',
+    admin_processing: 'Processando arquivo...',
+    admin_upload_hint: 'Arraste um PDF ou Excel aqui ou clique para selecionar',
+    admin_update_hint: 'Arraste o arquivo atualizado ou clique para selecionar',
+    admin_file_types: 'Arquivos permitidos: .pdf · .xlsx · .xls',
+    admin_loaded: 'Manuais carregados',
+    admin_no_manuals: 'Sem manuais carregados',
+    admin_delete: '🗑️ Excluir',
+    admin_delete_confirm: 'Tem certeza que deseja excluir',
+    admin_history_lock_title: 'Acesso Restrito',
+    admin_history_lock_text: 'Digite a senha do desenvolvedor para ver o histórico.',
+    admin_history_password_placeholder: 'Senha...',
+    admin_history_unlock: '🔓 Desbloquear',
+    admin_history_search: '🔍 Pesquisar...',
+    admin_history_refresh: '🔄 Atualizar',
+    admin_history_total: 'Total de consultas',
+    admin_history_positive: '👍 Positivas',
+    admin_history_negative: '👎 Negativas',
+    admin_history_users: 'Usuários',
+    admin_history_results: 'resultados encontrados',
+    admin_history_last: 'Últimas',
+    admin_history_queries: 'consultas',
+    admin_history_loading: '⏳ Carregando...',
+    admin_history_no_results: 'Nenhum resultado encontrado',
+    admin_history_empty: 'Sem consultas registradas',
+    admin_history_answer: 'Resposta:',
+    admin_pending_loading: '⏳ Carregando perguntas...',
+    admin_pending_empty: '✅ Nenhuma pergunta sem resposta!',
+    admin_pending_total: 'perguntas sem resposta',
+    admin_pending_store: '🏪 Loja:',
+    admin_pending_user: '👤',
+    stats_total: 'Total de Consultas',
+    stats_today: 'Hoje',
+    stats_week: 'Esta Semana',
+    stats_month: 'Este Mês',
+    stats_active_users: 'Usuários Ativos',
+    stats_satisfaction: 'Satisfação',
+    stats_pending: 'Sem Resposta',
+    stats_top_manuals: 'Top 5 Manuais',
+    stats_top_users: 'Top 5 Usuários',
+    stats_chart: 'Consultas — Últimos 7 dias',
+    stats_queries: 'consultas',
+    stats_loading: '⏳ Carregando...',
+    stats_last_30: '(últimos 30 dias)',
+    users_loading: '⏳ Carregando usuários...',
+    users_empty: 'Nenhum usuário registrado.',
+    users_store_placeholder: 'Atribuir loja...',
+    users_save: 'Salvar',
+    users_saved: '✓',
+    users_total: 'usuários registrados',
+    users_role: 'Função:',
+    users_store: 'Loja:',
+    users_no_store: 'Nenhuma loja atribuída'
+  },
+  fr: {
+    login_title: 'Bienvenue chez LUXO',
+    login_subtitle: 'Assistant Intelligent Sunglass Hut',
+    login_user: 'Utilisateur',
+    login_password: 'Mot de passe',
+    login_btn: 'Se Connecter',
+    login_loading: 'Vérification...',
+    login_user_placeholder: 'Votre utilisateur',
+    login_password_placeholder: 'Votre mot de passe',
+    header_welcome: 'Bienvenue,',
+    header_admin: '⚙️ Admin',
+    header_history: '📋 Mon Historique',
+    header_logout: 'Déconnexion',
+    chat_placeholder: 'Tapez votre question...',
+    chat_send: 'Envoyer',
+    chat_thinking: 'LUXO réfléchit...',
+    chat_empty_title: 'Bonjour ! Je suis LUXO',
+    chat_empty_sub: 'Votre assistant intelligent. Demandez-moi n\'importe quoi sur les manuels.',
+    chat_preview: '👁️ Aperçu :',
+    chat_download: '📥 Télécharger',
+    history_title: 'Mon Historique',
+    history_empty: 'Aucune requête enregistrée.',
+    history_loading: 'Chargement...',
+    history_answer_label: 'Réponse de LUXO :',
+    history_manual: '📄 Manuel :',
+    admin_title: '⚙️ Panneau d\'Administration',
+    admin_tab_manuals: '📚 Manuels',
+    admin_tab_history: '📋 Historique',
+    admin_tab_pending: '⚠️ Sans Réponse',
+    admin_tab_stats: '📊 Statistiques',
+    admin_tab_users: '👥 Utilisateurs',
+    admin_upload_new: '📤 Télécharger Nouveau',
+    admin_update: '🔄 Mettre à jour',
+    admin_processing: 'Traitement en cours...',
+    admin_upload_hint: 'Faites glisser un PDF/Excel ou cliquez pour sélectionner',
+    admin_update_hint: 'Faites glisser le fichier mis à jour ou cliquez',
+    admin_file_types: 'Fichiers autorisés : .pdf · .xlsx · .xls',
+    admin_loaded: 'Manuels chargés',
+    admin_no_manuals: 'Aucun manuel chargé',
+    admin_delete: '🗑️ Supprimer',
+    admin_delete_confirm: 'Voulez-vous vraiment supprimer',
+    admin_history_lock_title: 'Accès Restreint',
+    admin_history_lock_text: 'Entrez le mot de passe développeur pour voir l\'historique.',
+    admin_history_password_placeholder: 'Mot de passe...',
+    admin_history_unlock: '🔓 Déverrouiller',
+    admin_history_search: '🔍 Rechercher...',
+    admin_history_refresh: '🔄 Actualiser',
+    admin_history_total: 'Total requêtes',
+    admin_history_positive: '👍 Positifs',
+    admin_history_negative: '👎 Négatifs',
+    admin_history_users: 'Utilisateurs',
+    admin_history_results: 'résultats trouvés',
+    admin_history_last: 'Dernières',
+    admin_history_queries: 'requêtes',
+    admin_history_loading: '⏳ Chargement...',
+    admin_history_no_results: 'Aucun résultat trouvé',
+    admin_history_empty: 'Aucune requête enregistrée',
+    admin_history_answer: 'Réponse :',
+    admin_pending_loading: '⏳ Chargement des questions...',
+    admin_pending_empty: '✅ Aucune question sans réponse !',
+    admin_pending_total: 'questions sans réponse',
+    admin_pending_store: '🏪 Magasin :',
+    admin_pending_user: '👤',
+    stats_total: 'Total Requêtes',
+    stats_today: 'Aujourd\'hui',
+    stats_week: 'Cette Semaine',
+    stats_month: 'Ce Mois',
+    stats_active_users: 'Utilisateurs Actifs',
+    stats_satisfaction: 'Satisfaction',
+    stats_pending: 'Sans Réponse',
+    stats_top_manuals: 'Top 5 Manuels',
+    stats_top_users: 'Top 5 Utilisateurs',
+    stats_chart: 'Requêtes — 7 derniers jours',
+    stats_queries: 'requêtes',
+    stats_loading: '⏳ Chargement...',
+    stats_last_30: '(30 derniers jours)',
+    users_loading: '⏳ Chargement utilisateurs...',
+    users_empty: 'Aucun utilisateur enregistré.',
+    users_store_placeholder: 'Attribuer magasin...',
+    users_save: 'Enregistrer',
+    users_saved: '✓',
+    users_total: 'utilisateurs enregistrés',
+    users_role: 'Rôle :',
+    users_store: 'Magasin :',
+    users_no_store: 'Aucun magasin attribué'
+  },
+  zh: {
+    login_title: '欢迎使用 LUXO',
+    login_subtitle: 'Sunglass Hut 智能助手',
+    login_user: '用户名',
+    login_password: '密码',
+    login_btn: '登录',
+    login_loading: '验证中...',
+    login_user_placeholder: '您的用户名',
+    login_password_placeholder: '您的密码',
+    header_welcome: '欢迎，',
+    header_admin: '⚙️ 管理员',
+    header_history: '📋 我的历史',
+    header_logout: '登出',
+    chat_placeholder: '输入您的问题...',
+    chat_send: '发送',
+    chat_thinking: 'LUXO 正在思考...',
+    chat_empty_title: '你好！我是 LUXO',
+    chat_empty_sub: '您的智能助手。您可以问我关于操作手册的任何问题。',
+    chat_preview: '👁️ 预览：',
+    chat_download: '📥 下载',
+    history_title: '我的历史',
+    history_empty: '暂无查询记录。',
+    history_loading: '加载中...',
+    history_answer_label: 'LUXO 的回答：',
+    history_manual: '📄 手册：',
+    admin_title: '⚙️ 管理面板',
+    admin_tab_manuals: '📚 手册',
+    admin_tab_history: '📋 历史记录',
+    admin_tab_pending: '⚠️ 未回答',
+    admin_tab_stats: '📊 统计',
+    admin_tab_users: '👥 用户',
+    admin_upload_new: '📤 上传新文件',
+    admin_update: '🔄 更新',
+    admin_processing: '处理中...',
+    admin_upload_hint: '拖拽 PDF 或 Excel 到此处，或点击选择',
+    admin_update_hint: '拖拽更新后的文件，或点击选择',
+    admin_file_types: '允许的文件：.pdf · .xlsx · .xls',
+    admin_loaded: '已加载的手册',
+    admin_no_manuals: '没有加载手册',
+    admin_delete: '🗑️ 删除',
+    admin_delete_confirm: '您确定要删除吗',
+    admin_history_lock_title: '限制访问',
+    admin_history_lock_text: '输入开发者密码查看历史记录。',
+    admin_history_password_placeholder: '密码...',
+    admin_history_unlock: '🔓 解锁',
+    admin_history_search: '🔍 搜索...',
+    admin_history_refresh: '🔄 刷新',
+    admin_history_total: '总查询',
+    admin_history_positive: '👍 好评',
+    admin_history_negative: '👎 差评',
+    admin_history_users: '用户',
+    admin_history_results: '找到结果',
+    admin_history_last: '最新',
+    admin_history_queries: '查询',
+    admin_history_loading: '⏳ 加载中...',
+    admin_history_no_results: '未找到结果',
+    admin_history_empty: '无查询记录',
+    admin_history_answer: '回答：',
+    admin_pending_loading: '⏳ 加载问题中...',
+    admin_pending_empty: '✅ 没有未回答的问题！',
+    admin_pending_total: '未回答的问题',
+    admin_pending_store: '🏪 商店：',
+    admin_pending_user: '👤',
+    stats_total: '总查询量',
+    stats_today: '今天',
+    stats_week: '本周',
+    stats_month: '本月',
+    stats_active_users: '活跃用户',
+    stats_satisfaction: '满意度',
+    stats_pending: '未回答',
+    stats_top_manuals: '前5名手册',
+    stats_top_users: '前5名用户',
+    stats_chart: '查询 — 最近7天',
+    stats_queries: '次查询',
+    stats_loading: '⏳ 加载中...',
+    stats_last_30: '(最近30天)',
+    users_loading: '⏳ 加载用户...',
+    users_empty: '没有注册用户。',
+    users_store_placeholder: '分配商店...',
+    users_save: '保存',
+    users_saved: '✓',
+    users_total: '注册用户',
+    users_role: '角色：',
+    users_store: '商店：',
+    users_no_store: '未分配商店'
+  }
 };
 
-// Idioma activo — se lee de localStorage (default: 'es')
 let currentLang = localStorage.getItem('luxo_lang') || 'es';
 
-/**
- * Traduce una clave al idioma activo.
- * @param {string} key — Clave de traducción
- * @returns {string}
- */
 export function t(key) {
-  return (translations[currentLang] || translations['es'])[key] || key;
+  return (translations[currentLang] || translations['en'])[key] || key;
 }
 
-/**
- * Cambia el idioma activo y lo persiste en localStorage.
- * @param {'es'|'en'} lang
- */
 export function setLang(lang) {
   if (translations[lang]) {
     currentLang = lang;
@@ -239,7 +444,6 @@ export function setLang(lang) {
   }
 }
 
-/** Retorna el idioma activo ('es' o 'en'). */
 export function getLang() {
   return currentLang;
 }

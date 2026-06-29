@@ -1,0 +1,1208 @@
+import flet as ft
+import flet_video as fv
+import mysql.connector
+import requests
+import os
+import base64
+import fitz
+import tempfile
+import re
+import json
+import threading
+from tkinter import Tk, filedialog
+import openpyxl
+
+# =========================================
+# CONFIGURACION
+# =========================================
+
+BASE_PATH = os.path.dirname(__file__)
+ASSETS_PATH = os.path.join(BASE_PATH, "assets")
+
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), '../backend/.env'))
+
+# Valores por defecto
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = "llama-3.1-8b-instant"
+URL_GROQ = "https://api.groq.com/openai/v1/chat/completions"
+
+DB_CONFIG = {
+    "host": "localhost",
+    "user": "root",
+    "password": "los4valtierra",
+    "database": "sgh_portal"
+}
+
+# Cargar configuracion desde config.json si existe
+try:
+    config_path = os.path.join(BASE_PATH, "config.json")
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            config_data = json.load(f)
+            models = config_data.get("models", [])
+            if models:
+                primer_modelo = models[0]
+                GROQ_API_KEY = primer_modelo.get("apiKey", GROQ_API_KEY)
+                GROQ_MODEL = primer_modelo.get("model", GROQ_MODEL)
+                print(f"CONFIGURACIÓN CARGADA DESDE config.json: modelo '{GROQ_MODEL}'")
+except Exception as e:
+    print("ERROR CARGANDO config.json:", e)
+
+# =========================================
+# IMAGENES BASE64
+# =========================================
+
+def obtener_64(nombre):
+
+    def buscar_archivo(nombre_buscar):
+        target_base = os.path.splitext(nombre_buscar)[0]
+        for base in [BASE_PATH, ASSETS_PATH]:
+            ruta = os.path.join(base, nombre_buscar)
+            if os.path.exists(ruta):
+                return ruta
+            if os.path.isdir(base):
+                for nombre_archivo in os.listdir(base):
+                    archivo_base, archivo_ext = os.path.splitext(nombre_archivo)
+                    if archivo_base == target_base:
+                        return os.path.join(base, nombre_archivo)
+                    if archivo_base.startswith(target_base) and archivo_ext.lower() in [".jpeg", ".jpg", ".png"]:
+                        return os.path.join(base, nombre_archivo)
+        return None
+
+    try:
+        ruta = buscar_archivo(nombre)
+
+        if ruta and os.path.exists(ruta):
+            ext = os.path.splitext(ruta)[1].lower()
+            mime = "image/png" if ext == ".png" else "image/jpeg"
+            with open(ruta, "rb") as f:
+                contenido = base64.b64encode(f.read()).decode("utf-8")
+            return f"data:{mime};base64,{contenido}"
+
+    except Exception as e:
+        print("ERROR IMAGEN:", e)
+
+    return None
+
+# =========================================
+# MYSQL
+# =========================================
+
+def conectar_db():
+
+    try:
+        return mysql.connector.connect(**DB_CONFIG)
+
+    except Exception as e:
+        print("ERROR MYSQL:", e)
+        return None
+
+# =========================================
+# OBTENER PDF DESDE BD
+# =========================================
+
+def obtener_pdf_temporal(id_manual):
+    """Obtiene un PDF de la BD y lo guarda en un archivo temporal. Retorna (ruta, nombre) o (None, None)."""
+    try:
+        db = conectar_db()
+        if not db:
+            return None, None
+        cursor = db.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT Nombre_Archivo, Archivo_PDF FROM manuales WHERE ID_Manual = %s",
+            (id_manual,)
+        )
+        manual = cursor.fetchone()
+        db.close()
+        if manual:
+            ruta = os.path.join(tempfile.gettempdir(), manual["Nombre_Archivo"])
+            with open(ruta, "wb") as archivo:
+                archivo.write(manual["Archivo_PDF"])
+            return ruta, manual["Nombre_Archivo"]
+        return None, None
+    except Exception as e:
+        print("ERROR OBTENER PDF:", e)
+        return None, None
+
+def obtener_ruta_escritorio():
+    import winreg
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders")
+        path, _ = winreg.QueryValueEx(key, "Desktop")
+        return path
+    except Exception:
+        return os.path.join(os.path.expanduser("~"), "Desktop")
+
+def visualizar_pdf(id_manual, page=None):
+    """Abre el PDF en el visor del sistema sin guardar permanentemente."""
+    try:
+        ruta, nombre = obtener_pdf_temporal(id_manual)
+        if ruta:
+            os.startfile(ruta)
+            if page:
+                snack = ft.SnackBar(
+                    ft.Text(f"Visualizando: {nombre}", color="#7CFC00", size=16, weight="bold"),
+                    bgcolor="#111111", show_close_icon=True, open=True
+                )
+                page.overlay.append(snack)
+                page.update()
+        else:
+            if page:
+                snack = ft.SnackBar(
+                    ft.Text("Error: Manual no encontrado.", color="#FF4500", size=16, weight="bold"),
+                    bgcolor="#111111", show_close_icon=True, open=True
+                )
+                page.overlay.append(snack)
+                page.update()
+    except Exception as e:
+        print("ERROR VISUALIZAR:", e)
+
+def descargar_pdf_archivo(id_manual, page=None):
+    """Descarga el PDF al escritorio del usuario de forma robusta."""
+    try:
+        ruta_temp, nombre = obtener_pdf_temporal(id_manual)
+        if ruta_temp and nombre:
+            escritorio = obtener_ruta_escritorio()
+            ruta_destino = os.path.join(escritorio, nombre)
+            import shutil
+            shutil.copy2(ruta_temp, ruta_destino)
+            if page:
+                snack = ft.SnackBar(
+                    ft.Text(f"PDF guardado en Escritorio: {nombre}", color="#7CFC00", size=16, weight="bold"),
+                    bgcolor="#111111", show_close_icon=True, open=True
+                )
+                page.overlay.append(snack)
+                page.update()
+        else:
+            if page:
+                snack = ft.SnackBar(
+                    ft.Text("Error: Manual no encontrado.", color="#FF4500", size=16, weight="bold"),
+                    bgcolor="#111111", show_close_icon=True, open=True
+                )
+                page.overlay.append(snack)
+                page.update()
+    except Exception as e:
+        print("ERROR DESCARGA:", e)
+        if page:
+            snack = ft.SnackBar(
+                ft.Text(f"Error al descargar: {e}", color="#FF4500", size=16, weight="bold"),
+                bgcolor="#111111", show_close_icon=True, open=True
+            )
+            page.overlay.append(snack)
+            page.update()
+
+# =========================================
+# APP
+# =========================================
+
+def main(page: ft.Page):
+
+    page.title = "LUXO"
+
+    page.bgcolor = "#000000"
+
+    page.theme_mode = "dark"
+
+    page.window_width = 1100
+
+    page.window_height = 850
+
+    user_info = {
+        "id": None,
+        "nombre": "",
+        "rol": ""
+    }
+
+    def mostrar_snack(mensaje, color="#7CFC00"):
+        snack = ft.SnackBar(
+            ft.Text(mensaje, color=color, size=16, weight="bold"),
+            bgcolor="#111111",
+            duration=5000,
+            show_close_icon=True,
+            open=True
+        )
+        page.overlay.append(snack)
+        page.update()
+
+    # =========================================
+    # DIÁLOGOS DE ARCHIVO (SEGUROS CON TKINTER HILO SEPARADO)
+    # =========================================
+
+    def seleccionar_archivo_async(titulo, extensiones, callback):
+        def thread_target():
+            try:
+                root = Tk()
+                root.withdraw()
+                root.attributes("-topmost", True)
+                ruta = filedialog.askopenfilename(
+                    title=titulo,
+                    filetypes=extensiones
+                )
+                root.destroy()
+                if ruta:
+                    callback(ruta)
+            except Exception as ex:
+                print("ERROR TKINTER DIALOG:", ex)
+
+        threading.Thread(target=thread_target, daemon=True).start()
+
+    def procesar_cargar_pdf(ruta_pdf):
+        mostrar_snack("Procesando e insertando PDF...", color="#D8B4FE")
+        try:
+            db = conectar_db()
+            if not db:
+                mostrar_snack("Error: No se pudo conectar a la base de datos.", color="#FF4500")
+                return
+
+            cursor = db.cursor()
+            with open(ruta_pdf, "rb") as archivo:
+                pdf_binario = archivo.read()
+
+            pdf = fitz.open(ruta_pdf)
+            texto_extraido = ""
+            for pagina in pdf:
+                texto_extraido += pagina.get_text()
+
+            nombre_archivo = os.path.basename(ruta_pdf)
+
+            sql = """
+            INSERT INTO manuales
+            (Titulo, Nombre_Archivo, Archivo_PDF, Contenido_Texto, Categoria, Version)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            valores = (nombre_archivo, nombre_archivo, pdf_binario, texto_extraido, "General", "1.0")
+            cursor.execute(sql, valores)
+            db.commit()
+            db.close()
+
+            mostrar_snack(f"Manual '{nombre_archivo}' cargado exitosamente.")
+        except Exception as ex:
+            print("ERROR PDF:", ex)
+            mostrar_snack(f"Error al cargar PDF: {ex}", color="#FF4500")
+    def extraer_texto_excel(ruta_excel):
+        """Extrae texto del Excel asociando cada celda con su encabezado de columna.
+        Si data_only=True devuelve todo vacío (archivo con fórmulas sin caché),
+        reintenta leyendo las fórmulas como texto."""
+
+        def leer_filas(hoja):
+            filas = []
+            for fila in hoja.iter_rows(values_only=True):
+                vals = [str(c).strip() if c is not None else "" for c in fila]
+                if any(v for v in vals):
+                    filas.append(vals)
+            return filas
+
+        texto = ""
+        wb = openpyxl.load_workbook(ruta_excel, data_only=True)
+
+        for nombre_hoja in wb.sheetnames:
+            hoja = wb[nombre_hoja]
+            todas_filas = leer_filas(hoja)
+
+            # Si data_only devolvió todo vacío (fórmulas sin caché), reintenta sin data_only
+            if not todas_filas:
+                wb2 = openpyxl.load_workbook(ruta_excel, data_only=False)
+                hoja2 = wb2[nombre_hoja]
+                todas_filas = leer_filas(hoja2)
+                wb2.close()
+                print(f"[EXCEL] Hoja '{nombre_hoja}': usó modo sin data_only (fórmulas)")
+            else:
+                # Verificar si más del 80% de las celdas están vacías
+                total = sum(len(f) for f in todas_filas)
+                vacias = sum(1 for f in todas_filas for v in f if not v)
+                if total > 0 and (vacias / total) > 0.8:
+                    wb2 = openpyxl.load_workbook(ruta_excel, data_only=False)
+                    hoja2 = wb2[nombre_hoja]
+                    todas_filas_alt = leer_filas(hoja2)
+                    wb2.close()
+                    if todas_filas_alt:
+                        todas_filas = todas_filas_alt
+                        print(f"[EXCEL] Hoja '{nombre_hoja}': reemplazado por modo sin data_only (>80% vacías)")
+
+            texto += f"\n{'='*50}\nHOJA: {nombre_hoja}\n{'='*50}\n"
+
+            if not todas_filas:
+                texto += "(Hoja vacía)\n"
+                continue
+
+            # Detectar encabezados: primera fila no vacía
+            encabezados = []
+            for i, val in enumerate(todas_filas[0]):
+                encabezados.append(val if val else f"Columna_{i+1}")
+
+            texto += f"COLUMNAS: {' | '.join(encabezados)}\n\n"
+
+            # Cada fila de datos asociada con su encabezado
+            for num_fila, fila in enumerate(todas_filas[1:], start=2):
+                pares = []
+                for i, valor in enumerate(fila):
+                    if valor:
+                        header = encabezados[i] if i < len(encabezados) else f"Columna_{i+1}"
+                        pares.append(f"{header}: {valor}")
+                if pares:
+                    texto += f"FILA {num_fila}: " + " | ".join(pares) + "\n"
+
+        wb.close()
+        return texto
+
+    def procesar_cargar_excel(ruta_excel):
+        mostrar_snack("Procesando e insertando Excel...", color="#D8B4FE")
+        try:
+            db = conectar_db()
+            if not db:
+                mostrar_snack("Error: No se pudo conectar a la base de datos.", color="#FF4500")
+                return
+
+            cursor = db.cursor()
+
+            with open(ruta_excel, "rb") as archivo:
+                excel_binario = archivo.read()
+
+            texto_extraido = extraer_texto_excel(ruta_excel)
+
+            # Debug: imprimir lo extraído en consola
+            print("\n===== TEXTO EXTRAÍDO DEL EXCEL =====")
+            print(texto_extraido[:20000])
+            print("=====================================\n")
+
+            nombre_archivo = os.path.basename(ruta_excel)
+
+            sql = """
+            INSERT INTO manuales
+            (Titulo, Nombre_Archivo, Archivo_PDF, Contenido_Texto, Categoria, Version)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            valores = (nombre_archivo, nombre_archivo, excel_binario, texto_extraido, "Excel", "1.0")
+            cursor.execute(sql, valores)
+            db.commit()
+            db.close()
+
+            # Mostrar vista previa de lo que se extrajo
+            def cerrar_preview(e):
+                page.pop_dialog()
+
+            lineas_preview = texto_extraido.strip().split("\n")[:40]
+            preview_str = "\n".join(lineas_preview)
+            if len(texto_extraido.strip().split("\n")) > 40:
+                preview_str += "\n... (más filas guardadas)"
+
+            dialog_preview = ft.AlertDialog(
+                title=ft.Text(f"✅ Excel cargado: {nombre_archivo}", color="#7CFC00", weight="bold"),
+                content=ft.Container(
+                    content=ft.Column([
+                        ft.Text(
+                            "Así se leyó tu archivo (verifica que las columnas estén bien):",
+                            color="#aaaaaa", size=12
+                        ),
+                        ft.TextField(
+                            value=preview_str,
+                            multiline=True,
+                            read_only=True,
+                            color="white",
+                            bgcolor="#0a0a0a",
+                            border_color="#444444",
+                            min_lines=12,
+                            max_lines=16,
+                            text_style=ft.TextStyle(font_family="Courier New", size=11)
+                        )
+                    ], spacing=8),
+                    width=650,
+                    height=400,
+                    padding=10
+                ),
+                actions=[ft.TextButton("Cerrar", on_click=cerrar_preview)],
+                actions_alignment="end",
+                bgcolor="#1a1a1a"
+            )
+            page.show_dialog(dialog_preview)
+
+        except Exception as ex:
+            print("ERROR EXCEL:", ex)
+            mostrar_snack(f"Error al cargar Excel: {ex}", color="#FF4500")
+
+    def mostrar_manuales_admin(chat_display=None):
+        mostrar_snack("Listando manuales...")
+
+        try:
+            db = conectar_db()
+            if not db:
+                mostrar_snack("Error: No se pudo conectar a la base de datos.", color="#FF4500")
+                return
+            cursor = db.cursor(dictionary=True)
+            cursor.execute("SELECT ID_Manual, Nombre_Archivo, Titulo, Version FROM manuales ORDER BY Nombre_Archivo")
+            manuales = cursor.fetchall()
+            db.close()
+
+            if not manuales:
+                mostrar_snack("No hay manuales cargados.")
+                return
+
+            if chat_display is not None:
+                chat_display.controls.append(
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Text("Manuales cargados:", color="white", weight="bold"),
+                            *[
+                                ft.Text(f"{m.get('Nombre_Archivo', '')}  |  v{m.get('Version', '')}  |  {m.get('Titulo', '')}", color="white")
+                                for m in manuales
+                            ]
+                        ], spacing=4),
+                        bgcolor="#111111",
+                        padding=10,
+                        border_radius=10
+                    )
+                )
+                page.update()
+                return
+
+            items = []
+            for m in manuales:
+                nombre = m.get("Nombre_Archivo") or ""
+                version = m.get("Version") or ""
+                titulo = m.get("Titulo") or ""
+                items.append(
+                    ft.Row([
+                        ft.Text(nombre, expand=3, selectable=True),
+                        ft.Text(f"v{version}", width=80),
+                        ft.Text(titulo, expand=2)
+                    ], alignment="center")
+                )
+
+            contenido = ft.Column(items, spacing=6)
+
+            def cerrar_dialog(e):
+                page.pop_dialog()
+
+            dialog = ft.AlertDialog(
+                title=ft.Text("Manuales cargados"),
+                content=ft.Container(contenido, width=700, height=320),
+                actions=[ft.TextButton("Cerrar", on_click=cerrar_dialog)],
+                actions_alignment="end"
+            )
+
+            page.show_dialog(dialog)
+
+        except Exception as e:
+            print("ERROR LISTAR MANUALES:", e)
+            mostrar_snack("Error listando manuales.", color="#FF4500")
+
+    def borrar_manual_admin():
+        mostrar_snack("Cargando lista de manuales a eliminar...")
+        try:
+            db = conectar_db()
+            if not db:
+                mostrar_snack("Error: No se pudo conectar a la base de datos.", color="#FF4500")
+                return
+
+            cursor = db.cursor(dictionary=True)
+            cursor.execute("SELECT ID_Manual, Nombre_Archivo, Titulo, Version FROM manuales ORDER BY Nombre_Archivo")
+            manuales = cursor.fetchall()
+            db.close()
+
+            if not manuales:
+                mostrar_snack("No hay manuales para eliminar.")
+                return
+
+            def on_confirmar_borrado(id_manual, nombre_archivo, row_control):
+                try:
+                    db_del = conectar_db()
+                    if not db_del:
+                        mostrar_snack("Error de conexión", color="#FF4500")
+                        return
+                    cursor_del = db_del.cursor()
+
+                    # Borrado en cascada seguro para evitar fallos de claves foráneas
+                    cursor_del.execute("""
+                        DELETE FROM pendientes_actualizacion 
+                        WHERE ID_Conversacion IN (
+                            SELECT ID_Conversacion FROM historial_conversaciones WHERE ID_Manual = %s
+                        )
+                    """, (id_manual,))
+
+                    cursor_del.execute("DELETE FROM historial_conversaciones WHERE ID_Manual = %s", (id_manual,))
+                    cursor_del.execute("DELETE FROM manuales WHERE ID_Manual = %s", (id_manual,))
+                    db_del.commit()
+                    db_del.close()
+
+                    mostrar_snack(f"Manual '{nombre_archivo}' eliminado.")
+                    lista_manuales_container.controls.remove(row_control)
+                    page.update()
+
+                except Exception as ex:
+                    print("ERROR BORRADO MANUAL:", ex)
+                    mostrar_snack(f"Error al eliminar: {ex}", color="#FF4500")
+
+            lista_manuales_container = ft.Column(spacing=10, scroll=ft.ScrollMode.ALWAYS)
+
+            for m in manuales:
+                id_m = m["ID_Manual"]
+                nombre = m.get("Nombre_Archivo") or ""
+                version = m.get("Version") or ""
+
+                fila = ft.Row(alignment="spaceBetween")
+
+                info_text = ft.Text(
+                    f"{nombre} (v{version})", 
+                    color="white", 
+                    weight="normal",
+                    expand=True
+                )
+
+                btn_eliminar = ft.IconButton(
+                    icon=ft.Icons.DELETE_FOREVER,
+                    icon_color="#FF4500",
+                    tooltip=f"Eliminar {nombre}",
+                    on_click=lambda e, id_man=id_m, nom=nombre, f_ctrl=fila: on_confirmar_borrado(id_man, nom, f_ctrl)
+                )
+
+                fila.controls = [info_text, btn_eliminar]
+                lista_manuales_container.controls.append(fila)
+
+            def cerrar_dialog(e):
+                page.pop_dialog()
+
+            dialog = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Eliminar Manuales", color="#D8B4FE", weight="bold"),
+                content=ft.Container(
+                    content=lista_manuales_container,
+                    width=500,
+                    height=300,
+                    padding=10
+                ),
+                actions=[
+                    ft.TextButton("Cerrar", on_click=cerrar_dialog)
+                ],
+                actions_alignment="end"
+            )
+
+            page.show_dialog(dialog)
+
+        except Exception as e:
+            print("ERROR AL ABRIR DIALOGO BORRADO:", e)
+            mostrar_snack("Error al cargar menú de eliminación.", color="#FF4500")
+
+    img_avatar = obtener_64("avatar_luxo.png")
+
+    img_fondo = None
+
+    video_path = os.path.join(ASSETS_PATH, "luxo_avatar.mp4")
+    if not os.path.exists(video_path):
+        video_path = os.path.join(BASE_PATH, "luxo_avatar.mp4")
+
+    # =====================================
+    # CERRAR SESION
+    # =====================================
+
+    def cerrar_sesion():
+
+        user_info["id"] = None
+        user_info["nombre"] = ""
+        user_info["rol"] = ""
+
+        page.clean()
+
+        page.add(login_ui)
+
+        page.update()
+
+    # =====================================
+    # CHAT
+    # =====================================
+
+    def cargar_chat():
+
+        page.clean()
+
+        chat_display = ft.ListView(
+            expand=True,
+            spacing=10,
+            padding=20,
+            auto_scroll=True
+        )
+
+        # =================================
+        # ENVIAR MENSAJE
+        # =================================
+
+        def enviar_mensaje(e):
+            if not input_msg.value:
+                return
+
+            user_text = input_msg.value
+            chat_display.controls.append(
+                ft.Container(
+                    content=ft.Text(f"{user_info['nombre']}: {user_text}", color="white", weight="bold"),
+                    bgcolor="#222222",
+                    padding=10,
+                    border_radius=10
+                )
+            )
+            input_msg.value = ""
+            page.update()
+
+            try:
+                db = conectar_db()
+                if not db:
+                    chat_display.controls.append(
+                        ft.Text("ERROR: No se pudo conectar a la base de datos de manuales.", color="red")
+                    )
+                    page.update()
+                    return
+                cursor = db.cursor(dictionary=True)
+                cursor.execute("SELECT * FROM manuales")
+                manuales = cursor.fetchall()
+                db.close()
+
+                user_lower = user_text.lower()
+                palabras_query = re.findall(r"\w+", user_lower)
+                descarga_keywords = ["descargar", "descarga", "download", "bajar", "obtener archivo", "obtener pdf", "dame el pdf", "dame el manual", "puedes pasarme", "link del", "enlace del"]
+                lista_keywords = ["qué manuales", "que manuales", "manuales disponibles", "lista de pdf", "qué pdf", "que pdf", "mostrar pdf", "ver pdf", "documentos disponibles", "listar manuales"]
+                ask_for_pdf = any(phrase in user_lower for phrase in descarga_keywords)
+                ask_for_list = any(phrase in user_lower for phrase in lista_keywords)
+
+                stopwords = {"de", "la", "el", "los", "las", "un", "una", "pdf", "manual", "documento", "archivo", "archivos", "tienes", "telefono", "tienda", "hola", "cual", "es", "como", "donde", "por", "para", "con", "que", "quiero", "saber"}
+                query_palabras = [w for w in palabras_query if w not in stopwords and len(w) > 2]
+
+                manuales_texto = ""
+                manuales_meta = []
+                for manual in manuales:
+                    texto_manual = manual.get("Contenido_Texto") or ""
+                    nombre_archivo = manual.get("Nombre_Archivo") or ""
+                    manuales_meta.append({
+                        "id": manual["ID_Manual"],
+                        "nombre": nombre_archivo,
+                        "texto": texto_manual.lower()
+                    })
+
+                    if texto_manual:
+                        lineas = texto_manual.split("\n")
+                        lineas_filtradas = []
+                        for linea in lineas:
+                            linea_lower = linea.lower()
+                            # Incluir cabeceras estructurales de Excel o PDF cortas
+                            if "columna" in linea_lower or "hoja:" in linea_lower or "====" in linea_lower or len(linea) < 15:
+                                lineas_filtradas.append(linea)
+                                continue
+                            
+                            # Si no hay busqueda especifica, devolvemos todo truncado
+                            if not query_palabras:
+                                lineas_filtradas.append(linea)
+                                continue
+
+                            # Si sí hay palabras clave, incluimos la línea si hace match con alguna
+                            if any(q in linea_lower for q in query_palabras):
+                                lineas_filtradas.append(linea)
+
+                        texto_filtrado = "\n".join(lineas_filtradas)
+                        
+                        manuales_texto += f"""
+
+MANUAL / DOCUMENTO:
+{nombre_archivo}
+
+CONTENIDO:
+{texto_filtrado[:8000]}
+
+=================================
+"""
+
+
+                respuesta = ""
+                id_manual = None
+                nombre_pdf = ""
+
+                def score_manual(meta):
+                    nombre_archivo = meta["nombre"].lower()
+                    nombre_palabras = [w for w in re.findall(r"\w+", nombre_archivo) if w not in stopwords]
+                    score = 0
+                    if nombre_archivo and nombre_archivo in user_lower:
+                        score += 100
+                    score += sum(10 for palabra in nombre_palabras if palabra in query_palabras)
+                    score += sum(3 for palabra in nombre_palabras if palabra in user_lower)
+                    score += sum(2 for palabra in query_palabras if palabra in meta["texto"])
+                    return score
+
+                def buscar_manual_relacionado():
+                    mejor_manual = None
+                    mejor_puntaje = 0
+                    for meta in manuales_meta:
+                        puntaje = score_manual(meta)
+                        if puntaje > mejor_puntaje:
+                            mejor_puntaje = puntaje
+                            mejor_manual = meta
+                    return mejor_manual, mejor_puntaje
+
+                if ask_for_list:
+                    if manuales_meta:
+                        lista_nombres = ", ".join([m["nombre"] for m in manuales_meta])
+                        respuesta = f"Manuales disponibles: {lista_nombres}"
+                    else:
+                        respuesta = "No hay manuales cargados."
+                elif ask_for_pdf:
+                    mejor_manual, mejor_puntaje = buscar_manual_relacionado()
+                    if mejor_manual and mejor_puntaje >= 5:
+                        id_manual = mejor_manual["id"]
+                        nombre_pdf = mejor_manual["nombre"]
+                        respuesta = f"PDF relacionado: {nombre_pdf}"
+                    else:
+                        respuesta = "No encontré un PDF relacionado con tu pregunta. Si quieres, haz una pregunta más específica sobre el manual."
+                else:
+                    if manuales_texto.strip() == "":
+                        respuesta = "No hay manuales cargados para consultar."
+                    else:
+                        headers = {
+                            "Authorization": f"Bearer {GROQ_API_KEY}",
+                            "Content-Type": "application/json"
+                        }
+
+                        payload = {
+                            "model": GROQ_MODEL,
+                            "messages": [
+                                {
+                                    "role": "system",
+                                    "content": f"""
+Eres LUXO, asistente operativo de Sunglass Hut.
+
+Debes responder de manera natural, amable y profesional.
+Usa SOLO información encontrada dentro de los manuales y documentos proporcionados.
+
+ATENCIÓN: Si el documento es un archivo Excel, la información estará formateada como "FILA X: Columna1: Valor | Columna2: Valor". Debes asociar correctamente las columnas con sus valores en cada fila para dar una respuesta precisa (ej: si te piden el teléfono de una tienda, busca la fila de la tienda y lee su columna 'celular' o 'teléfono').
+
+Si no encuentras información, responde EXACTAMENTE:
+Por el momento no cuento con esta información.
+
+DOCUMENTOS / MANUALES:
+
+{manuales_texto[:6000]}
+"""
+                                },
+                                {
+                                    "role": "user",
+                                    "content": user_text
+                                }
+                            ]
+                        }
+
+                        res = requests.post(URL_GROQ, headers=headers, json=payload)
+                        if res.status_code == 200:
+                            try:
+                                data = res.json()
+                                if "choices" in data and data["choices"]:
+                                    respuesta = data["choices"][0]["message"]["content"]
+                                else:
+                                    respuesta = "Ocurrió un error consultando la IA."
+                            except Exception as e:
+                                print("AI PARSE ERROR:", e)
+                                print("AI RESPONSE TEXT:", res.text)
+                                respuesta = "Ocurrió un error consultando la IA."
+                        else:
+                            print("AI CONNECTION ERROR:", res.status_code, res.text)
+                            respuesta = f"Error de conexión con la IA ({res.status_code})."
+
+                chat_display.controls.append(
+                    ft.Container(
+                        content=ft.Row([
+                            ft.Container(
+                                content=fv.Video(
+                                    playlist=[fv.VideoMedia(video_path)],
+                                    playlist_mode=fv.PlaylistMode.LOOP,
+                                    autoplay=True,
+                                    muted=True,
+                                    controls=None,
+                                    width=35,
+                                    height=35,
+                                ) if os.path.exists(video_path) else (
+                                    ft.Image(src=img_avatar, width=35, height=35) if img_avatar else ft.Text("L", color="white", weight="bold")
+                                ),
+                                width=35,
+                                height=35,
+                                border_radius=17.5,
+                                clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                                border=ft.Border.all(1.5, "#00FFFF"),
+                            ),
+                            ft.Text(f"LUXO: {respuesta}", color="white", weight="bold", expand=True),
+                        ], vertical_alignment="start", spacing=10),
+                        bgcolor="#111111",
+                        padding=10,
+                        border_radius=10
+                    )
+                )
+
+                if ask_for_pdf and id_manual:
+                    chat_display.controls.append(
+                        ft.Container(
+                            content=ft.Row([
+                                ft.Icon(ft.Icons.PICTURE_AS_PDF, color="#D8B4FE"),
+                                ft.Text(f"{nombre_pdf}", color="white", weight="bold", expand=True),
+                                ft.ElevatedButton(
+                                    "👁 Visualizar",
+                                    on_click=lambda e, idm=id_manual: visualizar_pdf(idm, page),
+                                    bgcolor="#6E48AA",
+                                    color="white"
+                                ),
+                                ft.ElevatedButton(
+                                    "⬇ Descargar",
+                                    on_click=lambda e, idm=id_manual: descargar_pdf_archivo(idm, page),
+                                    bgcolor="#444444",
+                                    color="white"
+                                ),
+                            ], alignment="center", spacing=10),
+                            bgcolor="#1a1a2e",
+                            padding=10,
+                            border_radius=10
+                        )
+                    )
+
+                db = conectar_db()
+                if not db:
+                    chat_display.controls.append(
+                        ft.Text("ERROR: No se pudo registrar la conversación (Base de Datos desconectada).", color="red")
+                    )
+                    page.update()
+                    return
+                cursor = db.cursor()
+                sql_historial = """
+                INSERT INTO historial_conversaciones
+                (
+                    ID_Usuario,
+                    ID_Manual,
+                    Pregunta_Usuario,
+                    Respuesta_IA,
+                    Fecha_Hora,
+                    Fue_Respondida_Con_Manual
+                )
+                VALUES (%s, %s, %s, %s, NOW(), %s)
+                """
+                cursor.execute(
+                    sql_historial,
+                    (
+                        user_info["id"],
+                        id_manual,
+                        user_text,
+                        respuesta,
+                        1,
+                    )
+                )
+                db.commit()
+                id_conversacion = cursor.lastrowid
+
+                if "Por el momento no cuento con esta información" in respuesta:
+                    sql_pendiente = """
+                    INSERT INTO pendientes_actualizacion
+                    (
+                        ID_Conversacion,
+                        Pregunta_Faltante
+                    )
+                    VALUES (%s, %s)
+                    """
+                    cursor.execute(
+                        sql_pendiente,
+                        (
+                            id_conversacion,
+                            user_text
+                        )
+                    )
+                    db.commit()
+
+                db.close()
+
+            except Exception as e:
+                chat_display.controls.append(
+                    ft.Text(
+                        f"ERROR: {e}",
+                        color="red"
+                    )
+                )
+
+            page.update()
+
+        # =================================
+        # INPUT
+        # =================================
+
+        input_msg = ft.TextField(
+            hint_text="Escribe tu consulta...",
+            expand=True,
+            on_submit=enviar_mensaje,
+            border_color="#9D50BB",
+            color="white",
+            bgcolor="#111111"
+        )
+
+        def on_cargar_manual(ev):
+            seleccionar_archivo_async(
+                "Seleccionar PDF para cargar",
+                [("PDF files", "*.pdf")],
+                procesar_cargar_pdf
+            )
+
+        def on_cargar_excel(ev):
+            seleccionar_archivo_async(
+                "Seleccionar Excel para cargar",
+                [("Excel files", "*.xlsx *.xls"), ("Todos los archivos", "*.*")],
+                procesar_cargar_excel
+            )
+
+        def on_borrar_manual(ev):
+            borrar_manual_admin()
+
+        def on_cerrar_sesion(ev):
+            cerrar_sesion()
+
+        admin_menu_button = ft.Container()
+        if user_info["rol"] == "Admin":
+            admin_menu_button = ft.PopupMenuButton(
+                content=ft.Text("ADMIN", color="white"),
+                tooltip="Menú Admin",
+                bgcolor="#222222",
+                items=[
+                    ft.PopupMenuItem("CARGAR PDF", on_click=on_cargar_manual),
+                    ft.PopupMenuItem("CARGAR EXCEL", on_click=on_cargar_excel),
+                    ft.PopupMenuItem("BORRAR MANUAL", on_click=on_borrar_manual),
+                    ft.PopupMenuItem("CERRAR SESIÓN", on_click=on_cerrar_sesion)
+                ]
+            )
+
+        # =================================
+        # INTERFAZ
+        # =================================
+
+        chat_page = ft.Column([
+            ft.Row([
+                ft.Text(
+                    f"Bienvenido {user_info['nombre']}",
+                    size=22,
+                    color="#D8B4FE",
+                    weight="bold"
+                ),
+                admin_menu_button
+            ], alignment="spaceBetween", vertical_alignment="center"),
+            ft.Container(
+                content=chat_display,
+                expand=True,
+                bgcolor="#000000",
+                border_radius=20,
+                padding=10,
+                border=ft.Border.all(2, "#D8B4FE"),
+                shadow=[
+                    ft.BoxShadow(
+                        color="#D8B4FE",
+                        blur_radius=15,
+                        spread_radius=1,
+                    )
+                ]
+            ),
+            ft.Row([
+                input_msg,
+                ft.ElevatedButton(
+                    "ENVIAR",
+                    on_click=enviar_mensaje,
+                    bgcolor="#6E48AA",
+                    color="white"
+                )
+            ], spacing=10)
+        ], expand=True)
+
+        if img_fondo:
+            page.add(
+                ft.Container(
+                    expand=True,
+                    image=ft.DecorationImage(
+                        src=img_fondo,
+                        fit=ft.controls.box.BoxFit.COVER
+                    ),
+                    content=chat_page
+                )
+            )
+        else:
+            page.add(chat_page)
+
+        page.update()
+
+    # =====================================
+    # LOGIN
+    # =====================================
+
+    def login_click(e):
+
+        db = conectar_db()
+
+        if not db:
+            mostrar_snack("Error Base de Datos", color="#FF4B4B")
+            return
+
+        cursor = db.cursor(dictionary=True)
+
+        cursor.execute(
+            """
+            SELECT
+            ID_Usuario,
+            Nombre_Completo,
+            Rol
+            FROM usuarios
+            WHERE Usuario = %s
+            AND Contrasena = %s
+            """,
+            (
+                txt_user.value,
+                txt_pass.value
+            )
+        )
+
+        res = cursor.fetchone()
+
+        if res:
+            login_message.value = ""
+            login_error_box.visible = False
+
+            user_info["id"] = res["ID_Usuario"]
+            user_info["nombre"] = res["Nombre_Completo"]
+            user_info["rol"] = res["Rol"]
+            cargar_chat()
+
+        else:
+            cursor.execute(
+                """
+                SELECT
+                ID_Usuario
+                FROM usuarios
+                WHERE Usuario = %s
+                """,
+                (txt_user.value,)
+            )
+            usuario_existe = cursor.fetchone()
+
+            if usuario_existe:
+                mensaje = "Contraseña incorrecta"
+            else:
+                mensaje = "Usuario no registrado"
+
+            login_message.value = mensaje
+            login_message.color = "#FF4B4B"
+            login_error_box.visible = True
+            page.update()
+
+        db.close()
+
+    # =====================================
+    # LOGIN UI
+    # =====================================
+
+    txt_user = ft.TextField(
+        label="Usuario",
+        width=300
+    )
+
+    txt_pass = ft.TextField(
+        label="Contraseña",
+        password=True,
+        width=300,
+        on_submit=login_click
+    )
+
+    login_message = ft.Text(
+        "",
+        size=16,
+        weight="bold",
+        color="#FF4B4B"
+    )
+
+    login_error_box = ft.Container(
+        content=login_message,
+        bgcolor="#000000",
+        padding=10,
+        border_radius=10,
+        visible=False,
+        width=300
+    )
+
+    video_avatar = None
+    if os.path.exists(video_path):
+        video_avatar = ft.Container(
+            content=fv.Video(
+                playlist=[fv.VideoMedia(video_path)],
+                playlist_mode=fv.PlaylistMode.LOOP,
+                autoplay=True,
+                muted=True,
+                controls=None,
+                width=120,
+                height=120,
+            ),
+            width=120,
+            height=120,
+            border_radius=60,
+            clip_behavior=ft.ClipBehavior.HARD_EDGE,
+            border=ft.Border.all(2, "#00FFFF"),
+        )
+
+    login_ui = ft.Container(
+
+        content=ft.Column([
+
+            video_avatar if video_avatar else (
+                ft.Image(
+                    src=img_avatar,
+                    width=120,
+                    height=120,
+                    fit=ft.controls.box.BoxFit.COVER
+                ) if img_avatar else ft.Text(
+                    "LUXO",
+                    size=30,
+                    color="#FFFFFF",
+                    weight="bold"
+                )
+            ),
+
+            login_error_box,
+
+            ft.Text(
+                "SISTEMA LUXO",
+                size=25,
+                weight="bold",
+                color="#D8B4FE"
+            ),
+
+            txt_user,
+
+            txt_pass,
+
+            ft.ElevatedButton(
+                "INGRESAR",
+                on_click=login_click,
+                width=300,
+                bgcolor="#6E48AA",
+                color="white"
+            )
+
+        ],
+        horizontal_alignment="center",
+        spacing=20),
+
+        padding=40,
+        bgcolor="#000000",
+        border_radius=20,
+        border=ft.Border.all(2, "#00FFFF"),
+        shadow=[
+            ft.BoxShadow(
+                color="#00FFFF",
+                blur_radius=15,
+                spread_radius=1,
+            )
+        ],
+        clip_behavior=ft.ClipBehavior.HARD_EDGE
+    )
+
+    page.vertical_alignment = "center"
+
+    page.horizontal_alignment = "center"
+
+    page.add(login_ui)
+
+# =========================================
+# EJECUTAR APP
+# =========================================
+
+ft.app(target=main)
+

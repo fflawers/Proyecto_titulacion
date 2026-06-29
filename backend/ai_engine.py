@@ -5,6 +5,14 @@
 import requests
 import re
 import time
+import math
+import os
+import threading
+from groq import Groq
+import google.generativeai as genai
+from dotenv import load_dotenv
+load_dotenv()
+
 from config import (
     GROQ_API_KEY, URL_GROQ, GROQ_MODEL,
     MEMORY_SIZE, RAG_RELEVANCE_THRESHOLD,
@@ -12,6 +20,14 @@ from config import (
 import database
 import vector_store
 
+# =========================================
+# CONFIGURACIÓN GROQ Y GEMINI
+# =========================================
+
+groq_client = Groq(api_key=GROQ_API_KEY)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 # =========================================
 # LLAMADA A GROQ CON REINTENTOS
@@ -29,54 +45,84 @@ def llamar_groq(messages, max_reintentos=3):
     Returns:
         dict {ok: bool, respuesta: str}
     """
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": GROQ_MODEL,
-        "messages": messages,
-    }
-
     for intento in range(max_reintentos + 1):
         try:
-            res = requests.post(URL_GROQ, headers=headers, json=payload)
-
-            if res.status_code == 200:
-                data = res.json()
-                if "choices" in data and data["choices"]:
-                    return {"ok": True, "respuesta": data["choices"][0]["message"]["content"]}
-                else:
-                    return {"ok": False, "respuesta": "Ocurrió un error consultando la IA."}
-
-            elif res.status_code == 429:
-                # Rate limit — reintentar con espera progresiva
-                if intento < max_reintentos:
-                    espera = 2 ** (intento + 1)  # 2s, 4s, 8s
-                    print(f"⏳ Rate limit (429) — reintentando en {espera}s (intento {intento + 1}/{max_reintentos})")
-                    time.sleep(espera)
-                    continue
-                else:
-                    print("❌ Rate limit (429) — reintentos agotados")
-                    return {
-                        "ok": False,
-                        "respuesta": (
-                            "⏳ El servicio de IA está temporalmente saturado. "
-                            "Por favor espera unos segundos e intenta de nuevo."
-                        ),
-                    }
-            else:
-                print(f"AI CONNECTION ERROR: {res.status_code} {res.text}")
-                return {"ok": False, "respuesta": f"Error de conexión con la IA ({res.status_code})."}
-
-        except requests.exceptions.RequestException as e:
-            print(f"AI REQUEST EXCEPTION: {e}")
-            if intento < max_reintentos:
-                time.sleep(2)
+            chat_completion = groq_client.chat.completions.create(
+                messages=messages,
+                model=GROQ_MODEL,
+            )
+            return {"ok": True, "respuesta": chat_completion.choices[0].message.content}
+        except Exception as e:
+            if "429" in str(e) and intento < max_reintentos:
+                espera = 2 ** (intento + 1)
+                time.sleep(espera)
                 continue
             return {"ok": False, "respuesta": "Error de conexión con el servicio de IA."}
 
-    return {"ok": False, "respuesta": "Error inesperado al contactar la IA."}
+# =========================================
+# LLAMAR A GEMINI (Para Fotos/Videos)
+# =========================================
+
+def llamar_gemini(system_prompt, messages, archivo_bytes, archivo_tipo):
+    """
+    Llama a Gemini 1.5 Flash usando el historial y el archivo multimedia.
+    """
+    try:
+        model = genai.GenerativeModel(
+            model_name='gemini-1.5-flash',
+            system_instruction=system_prompt
+        )
+        
+        parts = []
+        if archivo_bytes:
+            parts.append({"mime_type": archivo_tipo, "data": archivo_bytes})
+            
+        # Convertir historial a texto
+        prompt_texto = "HISTORIAL CONVERSACIONAL (y pregunta actual al final):\n"
+        for msg in messages:
+            if msg["role"] != "system":
+                prompt_texto += f"{msg['role'].upper()}: {msg['content']}\n"
+                
+        parts.append(prompt_texto)
+        
+        response = model.generate_content(parts)
+        return {"respuesta": response.text}
+    except Exception as e:
+        print(f"Error en Gemini: {e}")
+        return {"respuesta": "Lo siento, tuve un problema analizando el archivo multimedia (verifica la clave de API y formato)."}
+
+def clasificar_pregunta_faltante_async(pregunta_texto, id_pend):
+    def run_classification():
+        try:
+            # Reimplementación simplificada para el hilo async
+            system_msg = {
+                "role": "system",
+                "content": "Clasifica la siguiente pregunta de un usuario en UNA de las siguientes categorías exactas: 'Impresoras', 'Políticas de Venta', 'Sistemas/Terminales', 'Manuales', 'Otros'. Responde ÚNICAMENTE con la palabra de la categoría (una sola palabra, sin comillas ni punto)."
+            }
+            user_msg = {"role": "user", "content": pregunta_texto}
+            messages = [system_msg, user_msg]
+            
+            res = llamar_groq(messages)
+            if res["ok"]:
+                categoria = res["respuesta"].strip().replace("'", "").replace('"', '').replace(".", "")
+                valid_categories = ['Impresoras', 'Políticas de Venta', 'Sistemas/Terminales', 'Manuales', 'Otros']
+                matched_cat = "Otros"
+                for cat in valid_categories:
+                    if cat.lower() in categoria.lower() or categoria.lower() in cat.lower():
+                        matched_cat = cat
+                        break
+                db_conn = database.conectar_db()
+                if db_conn:
+                    cursor_up = db_conn.cursor()
+                    cursor_up.execute(
+                        "UPDATE pendientes_actualizacion SET Categoria = %s WHERE ID_Pendiente = %s",
+                        (matched_cat, id_pend)
+                    )
+                    db_conn.commit()
+                    db_conn.close()
+        except Exception as ex:
+            print("ERROR EN CLASIFICACION ASYNC:", ex)
+    threading.Thread(target=run_classification, daemon=True).start()
 
 
 # =========================================
@@ -125,6 +171,45 @@ def es_tema_bloqueado(pregunta):
     """Detecta si la pregunta contiene temas prohibidos/mal uso."""
     pregunta_lower = pregunta.lower()
     return any(t in pregunta_lower for t in TEMAS_BLOQUEADOS)
+
+
+# =========================================
+# PALABRAS CLAVE — ROUTING A SOPORTE
+# =========================================
+
+# Palabras que indican un problema técnico que requiere soporte humano
+KEYWORDS_SOPORTE = [
+    # Impresoras / recibos
+    "impresora", "imprime", "imprimir", "no imprime", "papel", "cartucho",
+    "recibo", "ticket impreso", "impresion", "impresión",
+    # Terminales / cobro
+    "terminal", "pos", "no cobra", "no lee", "tarjeta no lee",
+    "datafóno", "datafono", "lector", "chip", "banda magnética",
+    # Sistema / cómputo
+    "sistema caíd", "sistema caío", "no abre", "no funciona el sistema",
+    "pantalla negra", "error sistema", "reinició", "reinicio solo",
+    "colgado", "colgada", "lento", "internet caído", "sin internet",
+    "wifi", "red", "conexion", "conexión",
+    # Caja / efectivo
+    "caja no abre", "cajón", "cajero", "billete falso",
+    # Alarmas / seguridad física
+    "alarma", "sensor", "antirrobo", "chicharra", "el sensor no",
+    # Fallas eléctricas
+    "luz", "apagó", "corte de luz", "no hay luz", "no enciende",
+    # Soporte explícito
+    "soporte", "técnico", "tecnico", "mantenimiento", "reparar", "reparación",
+    "ayuda urgente", "urgente", "problema con",
+]
+
+
+def detectar_necesita_soporte(pregunta):
+    """
+    Detecta si la pregunta contiene palabras clave que indican
+    un problema técnico-operativo que requiere soporte humano.
+    Retorna True si se recomienda crear un ticket.
+    """
+    pregunta_lower = pregunta.lower()
+    return any(kw in pregunta_lower for kw in KEYWORDS_SOPORTE)
 
 
 def es_tema_relevante(pregunta):
@@ -295,15 +380,9 @@ def buscar_manual_para_descarga(pregunta, manuales):
 # CONSTRUIR PROMPT DEL SISTEMA
 # =========================================
 
-def construir_prompt_sistema(chunks_contexto, usar_conocimiento_general=False):
+def construir_prompt_sistema(chunks_contexto, usar_conocimiento_general=False, idioma="es"):
     """
     Construye el system prompt con contexto RAG.
-    Si no hay buen contexto en los manuales, permite que la IA
-    use su conocimiento general (solo para temas de la empresa).
-
-    Args:
-        chunks_contexto: Lista de dicts del vector_store.buscar_contexto()
-        usar_conocimiento_general: Si True, la IA puede complementar con su conocimiento
     """
     # --- Contexto de manuales ---
     if not chunks_contexto:
@@ -342,7 +421,7 @@ INSTRUCCIONES PRINCIPALES:
 - PRIORIZA siempre la información de los manuales internos sobre cualquier otra fuente.
 - Si la información está en los manuales, úsala y cita el nombre del manual.
 {instruccion_fallback}
-- Puedes responder en español o inglés según el idioma de la pregunta.
+- RESPONDE ESTRICTAMENTE EN EL SIGUIENTE IDIOMA (Ignora en qué idioma esté tu contexto o los manuales): {idioma.upper()}.
 - Si la respuesta abarca varios pasos, usa listas numeradas.
 
 RESTRICCIONES DE SEGURIDAD:
@@ -365,9 +444,6 @@ CONTEXTO DE LOS MANUALES INTERNOS:
 def filtrar_chunks_relevantes(chunks, umbral=None):
     """
     Filtra chunks que tengan una distancia coseno por debajo del umbral.
-    Chunks con distancia alta = baja relevancia.
-
-    Retorna: (chunks_buenos, hay_contexto_bueno)
     """
     umbral = umbral or RAG_RELEVANCE_THRESHOLD
     buenos = [c for c in chunks if c.get("distancia", 1.0) <= umbral]
@@ -378,40 +454,18 @@ def filtrar_chunks_relevantes(chunks, umbral=None):
 # GENERAR RESPUESTA (core)
 # =========================================
 
-def generar_respuesta(pregunta, id_usuario):
-    """
-    Pipeline completo de respuesta con RAG + Web fallback:
-    1. Verificar guardrails (temas bloqueados / fuera de contexto)
-    2. Detectar intención
-    3. Buscar contexto relevante (RAG)
-    4. Si RAG no tiene buena info → buscar en web
-    5. Obtener historial reciente (memoria)
-    6. Llamar a Groq con todo el contexto
-    7. Guardar en historial
-
-    Args:
-        pregunta: Texto de la pregunta del usuario
-        id_usuario: ID del usuario que pregunta
-
-    Returns:
-        dict {
-            respuesta: str,
-            intencion: str,
-            id_manual: int|None,
-            nombre_pdf: str,
-            id_conversacion: int|None,
-        }
-    """
+def generar_respuesta(pregunta, id_usuario, idioma="es", archivo_bytes=None, archivo_tipo=None):
     resultado = {
         "respuesta": "",
         "intencion": "consulta",
         "id_manual": None,
         "nombre_pdf": "",
         "id_conversacion": None,
+        "es_abierto": True,
+        "sugiere_ticket": False,  # ← nuevo: True si la pregunta indica problema técnico
     }
 
     try:
-        # --- GUARDRAIL: Temas bloqueados ---
         if es_tema_bloqueado(pregunta):
             resultado["respuesta"] = (
                 "⚠️ Lo siento, no puedo ayudarte con ese tipo de consulta. "
@@ -420,31 +474,33 @@ def generar_respuesta(pregunta, id_usuario):
             )
             return resultado
 
+        # Detectar si la pregunta sugiere un problema técnico que requiere soporte
+        if detectar_necesita_soporte(pregunta):
+            resultado["sugiere_ticket"] = True
+
         intencion = detectar_intencion(pregunta)
         resultado["intencion"] = intencion
 
-        # --- Conversacional: saludo / meta-pregunta (sin PDF) ---
         if intencion == "conversacional":
-            # No buscar PDF, responder directamente con la IA
             historial = database.obtener_historial_reciente(id_usuario, MEMORY_SIZE)
-
-            system_prompt = construir_prompt_sistema([], usar_conocimiento_general=True)
+            system_prompt = construir_prompt_sistema([], usar_conocimiento_general=True, idioma=idioma)
             messages = [{"role": "system", "content": system_prompt}]
             for msg in historial:
                 messages.append({"role": "user", "content": msg["Pregunta_Usuario"]})
                 messages.append({"role": "assistant", "content": msg["Respuesta_IA"]})
             messages.append({"role": "user", "content": pregunta})
 
-            groq_result = llamar_groq(messages)
-            resultado["respuesta"] = groq_result["respuesta"]
+            if archivo_bytes and GEMINI_API_KEY:
+                resultado_ia = llamar_gemini(system_prompt, messages, archivo_bytes, archivo_tipo)
+            else:
+                resultado_ia = llamar_groq(messages)
 
-            # Guardar en historial SIN manual asociado
+            resultado["respuesta"] = resultado_ia["respuesta"]
+
             id_conv = database.guardar_historial(
                 id_usuario, None, pregunta, resultado["respuesta"]
             )
             resultado["id_conversacion"] = id_conv
-            # id_manual y nombre_pdf quedan como None/"" → no se muestra PDF
-            return resultado
 
         # --- Lista de manuales ---
         if intencion == "lista":
@@ -509,8 +565,14 @@ def generar_respuesta(pregunta, id_usuario):
 
         # Identificar el manual más relevante (de los buenos)
         if chunks_buenos:
-            resultado["id_manual"] = chunks_buenos[0].get("id_manual")
+            id_m = chunks_buenos[0].get("id_manual")
+            resultado["id_manual"] = id_m
             resultado["nombre_pdf"] = chunks_buenos[0].get("nombre_archivo", "")
+            if id_m:
+                for m in manuales_disponibles:
+                    if str(m["ID_Manual"]) == str(id_m):
+                        resultado["es_abierto"] = bool(m.get("Abierto", 1))
+                        break
 
         # 3. Si no hay buen contexto, ser honesto — NO alunar con conocimiento general
         usar_conocimiento_general = False
@@ -542,6 +604,7 @@ def generar_respuesta(pregunta, id_usuario):
         system_prompt = construir_prompt_sistema(
             chunks_buenos if hay_buen_contexto else chunks,
             usar_conocimiento_general,
+            idioma=idioma
         )
 
         messages = [{"role": "system", "content": system_prompt}]
@@ -554,9 +617,13 @@ def generar_respuesta(pregunta, id_usuario):
         # Agregar la pregunta actual
         messages.append({"role": "user", "content": pregunta})
 
-        # 6. Llamar a Groq (con reintentos automáticos)
-        groq_result = llamar_groq(messages)
-        resultado["respuesta"] = groq_result["respuesta"]
+        # 6. Llamar a Groq o Gemini (si hay multimedia)
+        if archivo_bytes and GEMINI_API_KEY:
+            resultado_ia = llamar_gemini(system_prompt, messages, archivo_bytes, archivo_tipo)
+        else:
+            resultado_ia = llamar_groq(messages)
+            
+        resultado["respuesta"] = resultado_ia["respuesta"]
 
         # 7. Guardar en historial
         id_conv = database.guardar_historial(
@@ -581,11 +648,22 @@ def generar_respuesta(pregunta, id_usuario):
             resultado["id_manual"] = None
             resultado["nombre_pdf"] = ""
 
-        # 9. Registrar pendiente si no pudo responder
+        # 9. Registrar pendiente si no pudo responder + auto-ticket
         if "no cuento con esta información" in resultado["respuesta"].lower() or \
            "no encontré" in resultado["respuesta"].lower():
             if id_conv:
                 database.guardar_pendiente(id_conv, pregunta)
+                # Crear auto-ticket para que el admin lo revise
+                database.crear_ticket_automatico(id_usuario, pregunta)
+                # Recuperar el ID insertado para pasarlo al hilo de clasificacion
+                db_c = database.conectar_db()
+                if db_c:
+                    cur = db_c.cursor()
+                    cur.execute("SELECT ID_Pendiente FROM pendientes_actualizacion WHERE ID_Conversacion = %s ORDER BY ID_Pendiente DESC LIMIT 1", (id_conv,))
+                    row = cur.fetchone()
+                    db_c.close()
+                    if row:
+                        clasificar_pregunta_faltante_async(pregunta, row[0])
 
     except Exception as e:
         print("ERROR AI ENGINE:", e)

@@ -25,6 +25,14 @@ URL_GROQ = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # =========================================
+# GOOGLE GEMINI (Vision AI para campañas)
+# =========================================
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+if not GEMINI_API_KEY:
+    print("ℹ️   GEMINI_API_KEY no configurada — auditoría visual de campañas desactivada")
+
+# =========================================
 # BASE DE DATOS
 # =========================================
 

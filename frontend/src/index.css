@@ -1118,10 +1118,161 @@ body {
     max-width: 90%;
   }
 
+  .module-nav {
+    gap: 2px;
+    padding: 4px 12px;
+  }
 
+  .module-nav-btn {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
 
   .modal {
     margin: 16px;
     padding: 24px;
+  }
+}
+
+/* =========================================
+   MÓDULOS DE NAVEGACIÓN
+   ========================================= */
+
+.module-nav {
+  display: flex;
+  gap: 4px;
+  padding: 8px 24px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.module-nav::-webkit-scrollbar {
+  height: 3px;
+}
+
+.module-nav-btn {
+  padding: 9px 18px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.module-nav-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+}
+
+.module-nav-btn.active {
+  background: rgba(124, 58, 237, 0.15);
+  color: var(--accent-tertiary);
+  border-color: rgba(124, 58, 237, 0.3);
+}
+
+.module-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  background:
+    radial-gradient(ellipse at 85% 10%, rgba(124, 58, 237, 0.04) 0%, transparent 50%),
+    var(--bg-primary);
+}
+
+/* =========================================
+   PRESUPUESTO RESPONSIVE
+   ========================================= */
+
+.presupuesto-main-container {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+}
+
+.presupuesto-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.presupuesto-header-controls {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.presupuesto-left-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: auto;
+}
+
+.presupuesto-right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.presupuesto-week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+@media (max-width: 768px) {
+  .presupuesto-main-container {
+    display: flex;
+    flex-direction: column;
+    overflow-y: visible;
+    min-height: auto;
+  }
+  
+  .presupuesto-left-panel {
+    overflow: visible;
+  }
+
+  .presupuesto-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .presupuesto-header-controls {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .presupuesto-header-controls select {
+    flex: 1;
+  }
+
+  .presupuesto-right-panel {
+    overflow: visible;
+  }
+
+  .presupuesto-week-headers {
+    display: none !important;
+  }
+
+  .presupuesto-week-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .presupuesto-empty-day {
+    display: none !important;
   }
 }

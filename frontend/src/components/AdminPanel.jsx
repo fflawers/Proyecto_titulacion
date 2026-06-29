@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  obtenerManuales, subirPDF, actualizarPDF, borrarManual,
+  obtenerManuales, subirPDF, actualizarPDF, borrarManual, toggleManualAbierto,
   obtenerPendientes, obtenerEstadisticas,
   obtenerUsuariosAdmin, actualizarTiendaUsuario,
-  reindexarManuales,
+  reindexarManuales, obtenerSugerenciasAdmin,
+  resolverPendiente,
 } from '../services/api';
 import { t } from '../services/i18n';
 
@@ -20,6 +21,10 @@ export default function AdminPanel({ onClose }) {
   const [mode, setMode] = useState('upload');
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef(null);
+
+  // --- Sugerencias state ---
+  const [sugerencias, setSugerencias] = useState([]);
+  const [sugerenciasLoading, setSugerenciasLoading] = useState(false);
 
   // --- Pendientes state ---
   const [pendientes, setPendientes] = useState([]);
@@ -43,7 +48,10 @@ export default function AdminPanel({ onClose }) {
     if (activeTab === 'pendientes' && pendientes.length === 0) {
       cargarPendientes();
     }
-    if (activeTab === 'estadisticas' && !stats) {
+    if (activeTab === 'sugerencias' && sugerencias.length === 0) {
+      cargarSugerencias();
+    }
+    if ((activeTab === 'estadisticas' || activeTab === 'eficacia') && !stats) {
       cargarEstadisticas();
     }
     if (activeTab === 'usuarios' && usuarios.length === 0) {
@@ -115,6 +123,18 @@ export default function AdminPanel({ onClose }) {
     }
   }
 
+  async function handleToggleAbierto(id) {
+    try {
+      await toggleManualAbierto(id);
+      setManuales(prev => prev.map(m =>
+        m.id === id ? { ...m, Abierto: !m.Abierto } : m
+      ));
+      showMessage('Estado actualizado', 'success');
+    } catch(err) {
+      showMessage(err.message, 'error');
+    }
+  }
+
   async function handleReindexar() {
     if (!confirm('¿Re-indexar todos los documentos con el pipeline mejorado? Esto puede tardar unos minutos.')) return;
     setReindexando(true);
@@ -142,6 +162,32 @@ export default function AdminPanel({ onClose }) {
       showMessage(err.message, 'error');
     } finally {
       setPendientesLoading(false);
+    }
+  }
+
+  async function handleResolverPendiente(idPendiente) {
+    try {
+      await resolverPendiente(idPendiente);
+      setPendientes(prev => prev.filter(p => p.ID_Pendiente !== idPendiente));
+      showMessage('Pregunta marcada como resuelta.', 'success');
+    } catch (err) {
+      showMessage(err.message, 'error');
+    }
+  }
+
+  // =========================
+  // SUGERENCIAS
+  // =========================
+
+  async function cargarSugerencias() {
+    setSugerenciasLoading(true);
+    try {
+      const data = await obtenerSugerenciasAdmin();
+      setSugerencias(data);
+    } catch (err) {
+      showMessage(err.message, 'error');
+    } finally {
+      setSugerenciasLoading(false);
     }
   }
 
@@ -290,8 +336,10 @@ export default function AdminPanel({ onClose }) {
         <div className="admin-tabs" style={{ flexWrap: 'wrap' }}>
           {[
             ['manuales', t('admin_tab_manuals')],
+            ['sugerencias', '💡 Sugerencias'],
             ['pendientes', t('admin_tab_pending')],
             ['estadisticas', t('admin_tab_stats')],
+            ['eficacia', '🧠 Eficacia IA'],
             ['usuarios', t('admin_tab_users')],
           ].map(([key, label]) => (
             <button
@@ -370,9 +418,18 @@ export default function AdminPanel({ onClose }) {
                     <span className="manual-name">{m.nombre_archivo || m.titulo}</span>
                     <span className="manual-version">v{m.version}</span>
                   </div>
-                  <button className="btn-delete" onClick={() => handleBorrar(m.id, m.nombre_archivo)}>
-                    {t('admin_delete')}
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button 
+                      className={m.Abierto ? "btn-primary" : "btn-admin"} 
+                      onClick={() => handleToggleAbierto(m.id)}
+                      title={m.Abierto ? "Público. Click para hacer privado" : "Privado. Click para hacer público"}
+                    >
+                      {m.Abierto ? '🔓 Público' : '🔒 Privado'}
+                    </button>
+                    <button className="btn-delete" onClick={() => handleBorrar(m.id, m.nombre_archivo)}>
+                      {t('admin_delete')}
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -412,20 +469,81 @@ export default function AdminPanel({ onClose }) {
                     borderLeft: '4px solid var(--error)',
                     borderRadius: '8px',
                     padding: '12px 14px',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '12px',
                   }}>
-                    <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', marginBottom: '8px' }}>
-                      💬 {p.Pregunta_Faltante}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', marginBottom: '8px' }}>
+                        💬 {p.Pregunta_Faltante}
+                      </div>
+                      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '12px', color: 'var(--text-muted)' }}>
+                        {p.nombre_usuario && (
+                          <span>{t('admin_pending_user')} {p.nombre_usuario}</span>
+                        )}
+                        {p.tienda && (
+                          <span>{t('admin_pending_store')} {p.tienda}</span>
+                        )}
+                        {p.Fecha_Registro && (
+                          <span>🕐 {formatFecha(p.Fecha_Registro)}</span>
+                        )}
+                        {p.Categoria && (
+                          <span style={{
+                            background: 'rgba(255,255,255,0.1)',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            color: 'var(--text-primary)'
+                          }}>🏷️ {p.Categoria}</span>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '12px', color: 'var(--text-muted)' }}>
-                      {p.nombre_usuario && (
-                        <span>{t('admin_pending_user')} {p.nombre_usuario}</span>
-                      )}
-                      {p.tienda && (
-                        <span>{t('admin_pending_store')} {p.tienda}</span>
-                      )}
-                      {p.Fecha_Registro && (
-                        <span>🕐 {formatFecha(p.Fecha_Registro)}</span>
-                      )}
+                    <button
+                      className="btn-primary"
+                      style={{ fontSize: '12px', padding: '5px 12px', whiteSpace: 'nowrap', flexShrink: 0 }}
+                      onClick={() => handleResolverPendiente(p.ID_Pendiente)}
+                      title="Marcar como resuelta"
+                    >
+                      ✅ Resuelta
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ===== TAB: SUGERENCIAS ===== */}
+        {activeTab === 'sugerencias' && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)', margin: 0 }}>
+                💡 Sugerencias de Usuarios
+              </h3>
+              <button className="btn-admin" onClick={cargarSugerencias} disabled={sugerenciasLoading}>
+                🔄 Actualizar
+              </button>
+            </div>
+
+            {sugerenciasLoading ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Cargando sugerencias...</div>
+            ) : sugerencias.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-muted)' }}>No hay sugerencias registradas.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {sugerencias.map((s) => (
+                  <div key={s.ID_Sugerencia} style={{
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    padding: '16px'
+                  }}>
+                    <p style={{ fontSize: '14px', margin: '0 0 12px 0', lineHeight: 1.5, color: 'var(--text-primary)' }}>
+                      "{s.Sugerencia}"
+                    </p>
+                    <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                      <span>👤 {s.Nombre_Completo}</span>
+                      <span>🏪 {s.Tienda || 'S/T'}</span>
+                      <span>🕐 {s.Fecha}</span>
                     </div>
                   </div>
                 ))}
@@ -515,6 +633,143 @@ export default function AdminPanel({ onClose }) {
                       ))
                     )}
                   </div>
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {/* ===== TAB: EFICACIA IA ===== */}
+        {activeTab === 'eficacia' && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+              <button className="btn-admin" onClick={cargarEstadisticas} disabled={statsLoading}>
+                🔄 Actualizar
+              </button>
+            </div>
+
+            {statsLoading || !stats ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Cargando...</div>
+            ) : (
+              <>
+                {/* Métricas principales */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '20px' }}>
+                  <KpiCard
+                    icon="👍"
+                    label="Tasa de satisfacción"
+                    value={stats.eficacia?.pct_positivo != null ? `${stats.eficacia.pct_positivo}%` : '—'}
+                    color="linear-gradient(90deg,#22c55e,#16a34a)"
+                    sub={`De ${stats.feedback?.total ?? 0} respuestas valoradas`}
+                  />
+                  <KpiCard
+                    icon="👎"
+                    label="Tasa de rechazo"
+                    value={stats.eficacia?.pct_negativo != null ? `${stats.eficacia.pct_negativo}%` : '—'}
+                    color="linear-gradient(90deg,#ef4444,#dc2626)"
+                    sub={`${stats.feedback?.negativos ?? 0} respuestas negativas`}
+                  />
+                  <KpiCard
+                    icon="✅"
+                    label="Tasa de resolución"
+                    value={stats.eficacia?.tasa_resolucion != null ? `${stats.eficacia.tasa_resolucion}%` : '—'}
+                    color="linear-gradient(90deg,#8b5cf6,#6d28d9)"
+                    sub="👍 del total de consultas"
+                  />
+                  <KpiCard
+                    icon="❓"
+                    label="Sin valorar"
+                    value={stats.eficacia?.sin_feedback ?? 0}
+                    color="linear-gradient(90deg,#6b7280,#4b5563)"
+                    sub="Consultas sin feedback"
+                  />
+                  <KpiCard
+                    icon="⚠️"
+                    label="Pendientes"
+                    value={stats.eficacia?.pendientes ?? 0}
+                    color="linear-gradient(90deg,#f59e0b,#d97706)"
+                    sub="IA no pudo responder"
+                  />
+                </div>
+
+                {/* Barra visual de satisfacción */}
+                {stats.eficacia?.pct_positivo != null && (
+                  <div style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '10px', padding: '16px', marginBottom: '16px' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '10px' }}>
+                      📊 Distribución de Feedback
+                    </div>
+                    <div style={{ display: 'flex', height: '20px', borderRadius: '10px', overflow: 'hidden', gap: '2px' }}>
+                      <div style={{
+                        width: `${stats.eficacia.pct_positivo}%`,
+                        background: 'linear-gradient(90deg,#22c55e,#16a34a)',
+                        transition: 'width 0.6s ease',
+                      }} />
+                      <div style={{
+                        width: `${stats.eficacia.pct_negativo}%`,
+                        background: 'linear-gradient(90deg,#ef4444,#dc2626)',
+                        transition: 'width 0.6s ease',
+                      }} />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '11px' }}>
+                      <span style={{ color: '#22c55e' }}>👍 {stats.eficacia.pct_positivo}% positivo ({stats.feedback?.positivos})</span>
+                      <span style={{ color: '#ef4444' }}>👎 {stats.eficacia.pct_negativo}% negativo ({stats.feedback?.negativos})</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Pendientes por categoría */}
+                {(stats.pendientes_por_categoria || []).length > 0 && (
+                  <div style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '10px', padding: '16px', marginBottom: '16px' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '10px' }}>
+                      📂 Preguntas sin resolver por categoría
+                    </div>
+                    {stats.pendientes_por_categoria.map((p, i) => {
+                      const max = stats.pendientes_por_categoria[0]?.total || 1;
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)', minWidth: '130px', flexShrink: 0 }}>{p.categoria}</div>
+                          <div style={{ flex: 1, background: 'rgba(255,255,255,0.05)', borderRadius: '4px', height: '10px' }}>
+                            <div style={{
+                              width: `${(p.total / max) * 100}%`,
+                              background: 'linear-gradient(90deg,#f59e0b,#d97706)',
+                              height: '100%', borderRadius: '4px',
+                              transition: 'width 0.5s ease',
+                            }} />
+                          </div>
+                          <div style={{ fontSize: '12px', fontWeight: 700, color: '#f59e0b', minWidth: '30px', textAlign: 'right' }}>{p.total}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Reportes de falla recientes */}
+                <div style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '10px', padding: '16px' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                    📃 Últimos reportes de falla (con comentario del usuario)
+                  </div>
+                  {(stats.fallos_recientes || []).length === 0 ? (
+                    <div style={{ fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>No hay reportes de falla con comentario aún.</div>
+                  ) : (
+                    stats.fallos_recientes.map((f, i) => (
+                      <div key={i} style={{
+                        padding: '12px',
+                        background: 'rgba(239,68,68,0.04)',
+                        border: '1px solid rgba(239,68,68,0.15)',
+                        borderRadius: '8px',
+                        marginBottom: '8px',
+                      }}>
+                        <div style={{ fontSize: '12px', color: '#f87171', fontWeight: 600, marginBottom: '4px' }}>
+                          👎 Pregunta: "{f.Pregunta_Usuario?.slice(0,80)}..."
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#ddd', marginBottom: '4px' }}>
+                          💬 Reporte: {f.Comentario_Falla}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#666' }}>
+                          👤 {f.Nombre_Completo} — {f.Fecha_Hora}
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </>
             )}
